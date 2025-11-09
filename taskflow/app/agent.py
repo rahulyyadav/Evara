@@ -58,16 +58,29 @@ class AgentOrchestrator:
         else:
             try:
                 genai.configure(api_key=settings.GEMINI_API_KEY)
-                self.gemini_model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
-                    safety_settings={
-                        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                    }
-                )
-                logger.info("✅ Gemini model initialized successfully")
+                # Try available models in order of preference
+                model_names = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-pro-latest"]
+                self.gemini_model = None
+                
+                for model_name in model_names:
+                    try:
+                        self.gemini_model = genai.GenerativeModel(
+                            model_name=model_name,
+                            safety_settings={
+                                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                            }
+                        )
+                        logger.info(f"✅ Gemini model initialized successfully with {model_name}")
+                        break
+                    except Exception as model_error:
+                        logger.debug(f"Failed to initialize with {model_name}: {model_error}")
+                        continue
+                
+                if not self.gemini_model:
+                    raise Exception(f"Failed to initialize with any model: {model_names}")
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini: {e}")
                 self.gemini_model = None
