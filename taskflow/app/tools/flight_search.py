@@ -78,17 +78,22 @@ class FlightSearchTool:
         logger.info(f"✈️ Flight search: {origin} -> {destination} on {date}")
         
         # Check if we need clarification
-        if not origin or not destination:
-            missing = []
-            if not origin:
-                missing.append("origin city")
-            if not destination:
-                missing.append("destination city")
-            
+        # Destination is required, origin can be optional (user might just say "flights to Mumbai")
+        if not destination:
             return {
                 "success": False,
                 "needs_clarification": True,
-                "message": f"I need more information to search flights. Please provide: {', '.join(missing)}.",
+                "message": "I need the destination city to search flights. Where would you like to go?",
+                "tool": "flight_search"
+            }
+        
+        # If origin is missing, we can still search but might need to ask
+        if not origin:
+            # Try to infer from context or ask user
+            return {
+                "success": False,
+                "needs_clarification": True,
+                "message": "I need the origin city to search flights. Where are you flying from?",
                 "tool": "flight_search"
             }
         
@@ -177,9 +182,26 @@ class FlightSearchTool:
         elif "next week" in date_lower:
             return (today + timedelta(days=7)).strftime("%Y-%m-%d")
         
-        # Try to extract month and day from strings like "Dec 15", "December 15"
+        # Handle "next [day of week]" patterns
         import re
-        month_pattern = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})"
+        next_day_pattern = r"next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+        match = re.search(next_day_pattern, date_lower)
+        if match:
+            target_day = match.group(1)
+            days_ahead = {
+                "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+                "friday": 4, "saturday": 5, "sunday": 6
+            }
+            target_weekday = days_ahead.get(target_day)
+            if target_weekday is not None:
+                current_weekday = today.weekday()
+                days_to_add = (target_weekday - current_weekday) % 7
+                if days_to_add == 0:
+                    days_to_add = 7  # Next week's day
+                return (today + timedelta(days=days_to_add)).strftime("%Y-%m-%d")
+        
+        # Try to extract month and day from strings like "Dec 15", "December 15", "Dec 3rd"
+        month_pattern = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?"
         match = re.search(month_pattern, date_lower)
         if match:
             month_name = match.group(1)
@@ -218,9 +240,21 @@ class FlightSearchTool:
         if not self.gemini_model:
             return None
         
-        prompt = f"""Parse this date string into YYYY-MM-DD format. Today is {datetime.now().strftime("%Y-%m-%d")}.
+        today = datetime.now()
+        day_of_week = today.strftime("%A")  # Monday, Tuesday, etc.
+        
+        prompt = f"""Parse this date string into YYYY-MM-DD format. 
+
+Today is {today.strftime("%Y-%m-%d")} ({day_of_week}).
 
 Date string: "{date_str}"
+
+Examples:
+- "next Tuesday" = next occurrence of Tuesday
+- "next Friday" = next occurrence of Friday  
+- "Dec 3rd" or "Dec 3" = December 3 (current or next year if past)
+- "tomorrow" = {today.strftime("%Y-%m-%d")}
+- "next week" = 7 days from today
 
 Respond with ONLY the date in YYYY-MM-DD format, nothing else. If you cannot parse it, respond with "null"."""
         

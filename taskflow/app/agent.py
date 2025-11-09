@@ -170,14 +170,14 @@ class AgentOrchestrator:
                     context += f"Assistant: {conv.get('response', '')}\n\n"
             
             # Create structured prompt for intent classification
-            prompt = f"""You are an AI assistant that classifies user messages into intents.
+            prompt = f"""You are an AI assistant that classifies user messages into intents and extracts entities intelligently.
 
 Available intents:
-1. "flight_search" - User wants to search for flights (e.g., "flights from Delhi to Mumbai", "cheap flights to Goa")
-2. "price_track" - User wants to track product prices, check tracked items, or stop tracking (e.g., "track iPhone price", "check tracked items", "stop tracking iPhone")
-3. "reminder" - User wants to set, list, or cancel reminders (e.g., "remind me to call mom", "show my reminders", "cancel reminder 1")
-4. "status_check" - User wants to check status of previous tasks (e.g., "check my flights", "what am I tracking", "show my reminders")
-5. "general" - Casual conversation, greetings, general knowledge questions, or any question that doesn't fit the above categories (e.g., "hello", "how are you", "what can you do", "who is the prime minister of switzerland", "what is the capital of France", "explain quantum physics")
+1. "flight_search" - User wants to search for flights (ANY phrasing: "flights from X to Y", "I need tickets X Y", "book flight X-Y", "can you find me flights to Y", "show flights between X and Y", "I want to travel X to Y", etc.)
+2. "price_track" - User wants to track product prices, check tracked items, or stop tracking
+3. "reminder" - User wants to set, list, or cancel reminders
+4. "status_check" - User wants to check status of previous tasks
+5. "general" - Casual conversation, greetings, general knowledge questions, or any question that doesn't fit the above categories
 
 {context}
 
@@ -188,16 +188,18 @@ Analyze the message and respond with ONLY a valid JSON object in this exact form
     "intent": "one_of_the_intents_above",
     "confidence": 0.0-1.0,
     "entities": {{
-        "origin": "city/airport if flight search",
-        "destination": "city/airport if flight search",
-        "date": "date if mentioned",
-        "product": "product name if price tracking",
-        "url": "product URL if price tracking",
-        "price_action": "action for price tracking: 'track', 'check', or 'stop' (e.g., 'stop tracking iPhone' -> price_action='stop')",
-        "target_price": "target price if mentioned",
+        "origin": "origin city/airport name - extract intelligently from ANY phrasing (e.g., 'from X', 'X to Y', 'X-Y', 'X Y', 'leaving X', 'departing X', 'starting from X', or first city mentioned)",
+        "destination": "destination city/airport name - extract intelligently from ANY phrasing (e.g., 'to Y', 'X to Y', 'X-Y', 'X Y', 'going to Y', 'arriving at Y', 'destination Y', or second city mentioned)",
+        "date": "date in original format as mentioned by user (e.g., 'next Tuesday', 'Dec 15', 'next Friday', 'tomorrow', '3rd December', '15/12', etc.)",
+        "product": "product name if price tracking (extract from any phrasing like 'track iPhone', 'iPhone price', 'search iPhone')",
+        "url": "product URL if price tracking (extract from any phrasing containing URL or link)",
+        "price_action": "action for price tracking: 'track' (default), 'check' (show tracked items), or 'stop' (stop tracking)",
+        "target_price": "target price if mentioned (extract numbers like 'below 50000', 'under ₹50000', 'when it's 50000')",
         "reminder_text": "reminder message if reminder",
         "reminder_time": "time/date for reminder if mentioned",
-        "reminder_action": "action for reminder: 'set', 'list', or 'cancel' (e.g., 'cancel reminder 1' -> reminder_action='cancel')",
+        "reminder_country": "user's country or location (e.g., 'India', 'USA', 'UK', 'Canada', 'Australia') for timezone",
+        "reminder_location": "user's city or location for timezone (alternative to country)",
+        "reminder_action": "action for reminder: 'set', 'list', or 'cancel'",
         "reminder_number": "reminder number if cancelling by number",
         "reminder_id": "reminder ID if cancelling by ID",
         "message": "original message for context"
@@ -206,11 +208,41 @@ Analyze the message and respond with ONLY a valid JSON object in this exact form
     "clarification_question": "question to ask if needs_clarification is true"
 }}
 
+CRITICAL INSTRUCTIONS FOR FLIGHT SEARCH:
+- Be VERY flexible in understanding flight queries - users may phrase them in ANY way
+- Extract origin and destination from ANY format: "X to Y", "X-Y", "X Y", "from X to Y", "X going to Y", "flights between X and Y", "tickets X Y", etc.
+- If user says "flights to Y" or "I want to go to Y", extract destination=Y, origin=null
+- If user says "flights from X" or "leaving from X", extract origin=X, destination=null
+- If two cities are mentioned, the first is usually origin, second is destination
+- For dates: Extract ANY date format mentioned - be flexible with "next Tuesday", "Dec 3rd", "3rd Dec", "15/12", "2024-12-15", etc.
+- Only set needs_clarification=true if BOTH origin AND destination are missing (or if it's truly unclear)
+- If only one city is mentioned, try to infer if it's origin or destination from context
+
+CRITICAL INSTRUCTIONS FOR PRICE TRACKING:
+- Be VERY flexible in understanding price tracking queries - users may phrase them in ANY way
+- Extract product name from ANY phrasing: "track iPhone", "iPhone price", "search iPhone", "find iPhone", "check iPhone price", "monitor iPhone", etc.
+- Extract URL if user provides a link or says "track this" with a URL
+- Extract target_price from phrases like "below 50000", "under ₹50000", "when it's 50000", "alert me at 50000", etc.
+- price_action should be: "track" (default for new tracking), "check" (show tracked items), or "stop" (stop tracking)
+- Examples:
+  - "track iPhone 15" → product="iPhone 15", price_action="track"
+  - "search me price of iphone 17" → product="iphone 17", price_action="track"
+  - "check my tracked items" → price_action="check"
+  - "stop tracking iPhone" → product="iPhone", price_action="stop"
+  - "track iPhone below 50000" → product="iPhone", target_price=50000, price_action="track"
+
+Examples of flexible extraction:
+- "can you track flight from chennai to bagdogra on dec 3rd" → origin="chennai", destination="bagdogra", date="dec 3rd"
+- "find flights to mumbai next tuesday" → origin=null, destination="mumbai", date="next tuesday"
+- "I need tickets chennai bagdogra" → origin="chennai", destination="bagdogra", date=null
+- "book me a flight from delhi going to goa tomorrow" → origin="delhi", destination="goa", date="tomorrow"
+- "show me flights between mumbai and delhi" → origin="mumbai", destination="delhi" (or vice versa based on context)
+
 Important:
 - Return ONLY the JSON object, no other text
 - Use null for missing entities
-- Be confident in intent classification
-- If unclear, set needs_clarification to true and provide a helpful question
+- Be confident and intelligent in entity extraction
+- Handle ANY phrasing or twisted way of asking for flights
 """
             
             # Call Gemini with retry logic
@@ -307,10 +339,22 @@ Important:
         
         try:
             if intent == self.INTENT_FLIGHT_SEARCH:
+                # Clean and normalize entity values
+                origin = entities.get("origin")
+                destination = entities.get("destination")
+                date = entities.get("date")
+                
+                # Remove None, empty strings, and "null" strings
+                origin = origin if origin and origin.lower() != "null" else None
+                destination = destination if destination and destination.lower() != "null" else None
+                date = date if date and date.lower() != "null" else None
+                
+                logger.info(f"🔍 Flight search entities - Origin: {origin}, Destination: {destination}, Date: {date}")
+                
                 result = await self.flight_tool.search(
-                    origin=entities.get("origin"),
-                    destination=entities.get("destination"),
-                    date=entities.get("date")
+                    origin=origin,
+                    destination=destination,
+                    date=date
                 )
                 return result
             
@@ -335,11 +379,29 @@ Important:
                 elif action == "check":
                     result = await self.price_tool.get_tracked_items(user_number)
                 else:
+                    # Parse target_price if provided (could be string or number)
+                    target_price = entities.get("target_price")
+                    if target_price:
+                        try:
+                            # Try to convert to float if it's a string
+                            if isinstance(target_price, str):
+                                # Remove currency symbols and extract number
+                                import re
+                                price_match = re.search(r'(\d+\.?\d*)', target_price.replace(',', ''))
+                                if price_match:
+                                    target_price = float(price_match.group(1))
+                                else:
+                                    target_price = None
+                            else:
+                                target_price = float(target_price)
+                        except (ValueError, TypeError):
+                            target_price = None
+                    
                     result = await self.price_tool.track_product(
                         user_number=user_number,
                         url=entities.get("url"),
                         product_name=entities.get("product"),
-                        target_price=entities.get("target_price")
+                        target_price=target_price
                     )
                 return result
             
@@ -367,12 +429,29 @@ Important:
                 elif action == "list":
                     result = await self.reminder_tool.get_reminders(user_number)
                 else:
+                    # Get user's stored timezone/country from preferences
+                    user_memory = self.memory_store.get_user_memory(user_number)
+                    user_country = user_memory.get("preferences", {}).get("country") or entities.get("reminder_country")
+                    user_location = user_memory.get("preferences", {}).get("location") or entities.get("reminder_location")
+                    
                     result = await self.reminder_tool.set_reminder(
                         user_number=user_number,
                         message=entities.get("reminder_text", ""),
-                        datetime_str=entities.get("reminder_time")
+                        datetime_str=entities.get("reminder_time"),
+                        country=user_country,
+                        location=user_location
                     )
-                return result
+                    
+                    # If reminder was set successfully and we got country/location, save it to preferences
+                    if result.get("success") and (user_country or user_location):
+                        preferences = user_memory.get("preferences", {})
+                        if user_country:
+                            preferences["country"] = user_country
+                        if user_location:
+                            preferences["location"] = user_location
+                        self.memory_store.update_preferences(user_number, preferences)
+                    
+                    return result
             
             else:
                 logger.warning(f"No tool available for intent: {intent}")
@@ -545,10 +624,11 @@ Generate a friendly, concise response (under 1600 characters) that:
 1. Is natural and conversational
 2. Addresses the user's request
 3. If tool was executed, explains the result clearly
-4. If clarification is needed, asks a helpful question
+4. If clarification is needed, asks a helpful question in a friendly way (e.g., "I'd be happy to help! Could you tell me [missing info]?")
 5. Uses emojis appropriately (but not excessively)
 6. Is formatted for WhatsApp (short paragraphs, bullet points if needed)
 7. Only mention information about Evara's creator/contact if the user explicitly asks
+8. For flight search: If clarification is needed, be helpful and ask for missing info (origin, destination, or date) in a friendly, conversational way
 
 Respond directly with the message text, no JSON or code blocks."""
             
@@ -663,7 +743,10 @@ Respond directly with the message text, no JSON or code blocks."""
             return f"✈️ No flights found from {origin} to {destination} on {date}. Try different dates?"
         
         # Build response message
-        message = f"✈️ Found {len(flights)} flight(s) from {origin} to {destination} on {date}:\n\n"
+        message = f"✈️ *Flight Search Results*\n\n"
+        message += f"📍 {origin} → {destination}\n"
+        message += f"📅 {date}\n\n"
+        message += f"Found {len(flights)} flight(s):\n\n"
         
         for i, flight in enumerate(flights, 1):
             airline = flight.get("airline", "Unknown")
@@ -673,16 +756,16 @@ Respond directly with the message text, no JSON or code blocks."""
             stops = flight.get("stops", "Direct")
             booking_link = flight.get("booking_link")
             
-            message += f"✈️ {airline} - {price}\n"
-            message += f"⏰ {dep_time} - {arr_time} ({stops})\n"
+            message += f"*{i}. {airline}*\n"
+            message += f"💰 {price}\n"
+            message += f"⏰ {dep_time} → {arr_time}\n"
+            message += f"🛫 {stops}\n"
             
             if booking_link:
-                message += f"🔗 {booking_link}\n"
+                message += f"🔗 Book: {booking_link}\n"
             
             if i < len(flights):
                 message += "\n"
-        
-        message += "\nWant me to check baggage options or flexible dates?"
         
         return message
     

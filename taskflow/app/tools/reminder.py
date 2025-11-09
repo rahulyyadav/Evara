@@ -71,6 +71,8 @@ class ReminderTool:
         user_number: str,
         message: str,
         datetime_str: Optional[str] = None,
+        country: Optional[str] = None,
+        location: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -80,24 +82,38 @@ class ReminderTool:
             user_number: User's phone number
             message: Reminder message/task description
             datetime_str: When to remind (ISO format or natural language)
+            country: User's country for timezone (e.g., "India", "USA", "UK")
+            location: User's city/location for timezone (alternative to country)
             **kwargs: Additional parameters
             
         Returns:
             Dictionary with reminder status or error message
         """
-        logger.info(f"⏰ Reminder requested: {message} at {datetime_str}")
+        logger.info(f"⏰ Reminder requested: {message} at {datetime_str} (country: {country}, location: {location})")
         
         try:
-            # Parse datetime
+            # Check if we need time
             if not datetime_str:
                 return {
                     "success": False,
                     "needs_clarification": True,
-                    "message": "When should I remind you? Please specify a date and time.",
+                    "message": "When should I remind you? Please specify a date and time. Also, please let me know your country or location so I can set the reminder in your local timezone.",
                     "tool": "reminder"
                 }
             
-            parsed_datetime = await self._parse_datetime(datetime_str)
+            # Check if we need country/location for timezone
+            if not country and not location:
+                return {
+                    "success": False,
+                    "needs_clarification": True,
+                    "message": "I need to know your country or location to set the reminder in your local timezone. Please specify your country (e.g., 'India', 'USA', 'UK') or city.",
+                    "tool": "reminder"
+                }
+            
+            # Get timezone based on country/location
+            user_timezone = self._get_timezone_from_country(country, location)
+            
+            parsed_datetime = await self._parse_datetime(datetime_str, timezone=user_timezone)
             if not parsed_datetime:
                 return {
                     "success": False,
@@ -106,9 +122,9 @@ class ReminderTool:
                     "tool": "reminder"
                 }
             
-            # Ensure datetime is in IST and in the future
-            now_ist = datetime.now(IST)
-            if parsed_datetime <= now_ist:
+            # Ensure datetime is in user's timezone and in the future
+            now_user_tz = datetime.now(user_timezone)
+            if parsed_datetime <= now_user_tz:
                 return {
                     "success": False,
                     "message": "That time is in the past. Please set a reminder for a future time.",
@@ -121,8 +137,11 @@ class ReminderTool:
                 "id": reminder_id,
                 "task": message,
                 "datetime": parsed_datetime.isoformat(),
+                "timezone": str(user_timezone),
+                "country": country,
+                "location": location,
                 "status": "pending",
-                "created_at": datetime.now(IST).isoformat()
+                "created_at": datetime.now(user_timezone).isoformat()
             }
             
             # Save to memory
@@ -132,9 +151,10 @@ class ReminderTool:
             datetime_display = parsed_datetime.strftime("%b %d, %Y at %I:%M %p")
             active_count = len(self.memory_store.get_reminders(user_number, status="pending"))
             
+            timezone_display = country or location or "your timezone"
             response = (
                 f"✅ Reminder set!\n"
-                f"📅 {datetime_display}\n"
+                f"📅 {datetime_display} ({timezone_display})\n"
                 f"📝 {message}\n\n"
                 f"You have {active_count} active reminder(s)."
             )
@@ -295,17 +315,83 @@ class ReminderTool:
                 "tool": "reminder"
             }
     
-    async def _parse_datetime(self, datetime_str: str) -> Optional[datetime]:
+    def _get_timezone_from_country(self, country: Optional[str], location: Optional[str]) -> pytz.timezone:
+        """
+        Get timezone from country or location.
+        
+        Args:
+            country: Country name (e.g., "India", "USA", "UK")
+            location: City/location name
+            
+        Returns:
+            pytz timezone object (defaults to IST if not found)
+        """
+        # Common country to timezone mappings
+        country_timezones = {
+            "india": "Asia/Kolkata",
+            "nepal": "Asia/Kathmandu",
+            "usa": "America/New_York",
+            "united states": "America/New_York",
+            "uk": "Europe/London",
+            "united kingdom": "Europe/London",
+            "canada": "America/Toronto",
+            "australia": "Australia/Sydney",
+            "germany": "Europe/Berlin",
+            "france": "Europe/Paris",
+            "japan": "Asia/Tokyo",
+            "china": "Asia/Shanghai",
+            "singapore": "Asia/Singapore",
+            "uae": "Asia/Dubai",
+            "united arab emirates": "Asia/Dubai",
+            "saudi arabia": "Asia/Riyadh",
+        }
+        
+        # Try country first
+        if country:
+            country_lower = country.lower().strip()
+            if country_lower in country_timezones:
+                return pytz.timezone(country_timezones[country_lower])
+        
+        # Try location/city (common cities)
+        if location:
+            location_lower = location.lower().strip()
+            # Common city mappings
+            city_timezones = {
+                "mumbai": "Asia/Kolkata",
+                "delhi": "Asia/Kolkata",
+                "bangalore": "Asia/Kolkata",
+                "chennai": "Asia/Kolkata",
+                "kolkata": "Asia/Kolkata",
+                "kathmandu": "Asia/Kathmandu",
+                "new york": "America/New_York",
+                "los angeles": "America/Los_Angeles",
+                "london": "Europe/London",
+                "toronto": "America/Toronto",
+                "sydney": "Australia/Sydney",
+                "tokyo": "Asia/Tokyo",
+            }
+            if location_lower in city_timezones:
+                return pytz.timezone(city_timezones[location_lower])
+        
+        # Default to IST
+        logger.warning(f"Could not determine timezone for country={country}, location={location}, defaulting to IST")
+        return IST
+    
+    async def _parse_datetime(self, datetime_str: str, timezone: Optional[pytz.timezone] = None) -> Optional[datetime]:
         """
         Parse flexible datetime strings into datetime objects.
         Handles formats like "tomorrow at 3pm", "Dec 10 at 3pm", "in 2 hours", etc.
         
         Args:
             datetime_str: Datetime string (flexible format)
+            timezone: Target timezone (defaults to IST)
             
         Returns:
-            Datetime object in IST timezone or None if parsing fails
+            Datetime object in specified timezone or None if parsing fails
         """
+        if timezone is None:
+            timezone = IST
+        
         datetime_str = datetime_str.strip()
         
         # Try dateparser first (if available)
@@ -313,14 +399,14 @@ class ReminderTool:
             try:
                 parsed = dateparser.parse(
                     datetime_str,
-                    settings={'TIMEZONE': 'Asia/Kolkata', 'RETURN_AS_TIMEZONE_AWARE': True}
+                    settings={'TIMEZONE': str(timezone), 'RETURN_AS_TIMEZONE_AWARE': True}
                 )
                 if parsed:
-                    # Ensure it's in IST
+                    # Ensure it's in the correct timezone
                     if parsed.tzinfo is None:
-                        parsed = IST.localize(parsed)
+                        parsed = timezone.localize(parsed)
                     else:
-                        parsed = parsed.astimezone(IST)
+                        parsed = parsed.astimezone(timezone)
                     return parsed
             except Exception as e:
                 logger.debug(f"Dateparser failed: {e}")
@@ -328,40 +414,45 @@ class ReminderTool:
         # Try Gemini if available
         if self.gemini_model:
             try:
-                parsed = await self._parse_datetime_with_gemini(datetime_str)
+                parsed = await self._parse_datetime_with_gemini(datetime_str, timezone)
                 if parsed:
                     return parsed
             except Exception as e:
                 logger.debug(f"Gemini datetime parsing failed: {e}")
         
         # Fallback: try simple patterns
-        return self._parse_datetime_fallback(datetime_str)
+        return self._parse_datetime_fallback(datetime_str, timezone)
     
-    async def _parse_datetime_with_gemini(self, datetime_str: str) -> Optional[datetime]:
+    async def _parse_datetime_with_gemini(self, datetime_str: str, timezone: Optional[pytz.timezone] = None) -> Optional[datetime]:
         """
         Use Gemini to parse flexible datetime strings.
         
         Args:
             datetime_str: Flexible datetime string
+            timezone: Target timezone (defaults to IST)
             
         Returns:
-            Datetime object in IST or None
+            Datetime object in specified timezone or None
         """
         if not self.gemini_model:
             return None
         
-        now_ist = datetime.now(IST)
-        prompt = f"""Parse this datetime string into ISO 8601 format (YYYY-MM-DDTHH:MM:SS) in IST timezone.
-Current time in IST: {now_ist.strftime("%Y-%m-%d %H:%M:%S %Z")}
+        if timezone is None:
+            timezone = IST
+        
+        now_tz = datetime.now(timezone)
+        timezone_name = str(timezone)
+        prompt = f"""Parse this datetime string into ISO 8601 format (YYYY-MM-DDTHH:MM:SS) in {timezone_name} timezone.
+Current time in {timezone_name}: {now_tz.strftime("%Y-%m-%d %H:%M:%S %Z")}
 
 Datetime string: "{datetime_str}"
 
 Examples:
-- "tomorrow at 3pm" -> {((now_ist + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)).isoformat()}
-- "in 2 hours" -> {(now_ist + timedelta(hours=2)).isoformat()}
-- "Dec 10 at 3pm" -> {now_ist.replace(month=12, day=10, hour=15, minute=0, second=0, microsecond=0).isoformat() if now_ist.month <= 12 else (now_ist.replace(year=now_ist.year+1, month=12, day=10, hour=15, minute=0, second=0, microsecond=0)).isoformat()}
+- "tomorrow at 3pm" -> {((now_tz + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)).isoformat()}
+- "in 2 hours" -> {(now_tz + timedelta(hours=2)).isoformat()}
+- "Dec 10 at 3pm" -> {now_tz.replace(month=12, day=10, hour=15, minute=0, second=0, microsecond=0).isoformat() if now_tz.month <= 12 else (now_tz.replace(year=now_tz.year+1, month=12, day=10, hour=15, minute=0, second=0, microsecond=0)).isoformat()}
 
-Respond with ONLY the ISO datetime string in IST timezone, nothing else. If you cannot parse it, respond with "null"."""
+Respond with ONLY the ISO datetime string in {timezone_name} timezone, nothing else. If you cannot parse it, respond with "null"."""
         
         try:
             response = self.gemini_model.generate_content(prompt)
@@ -373,11 +464,11 @@ Respond with ONLY the ISO datetime string in IST timezone, nothing else. If you 
             # Parse ISO format
             try:
                 parsed = datetime.fromisoformat(result.replace('Z', '+00:00'))
-                # Convert to IST
+                # Convert to target timezone
                 if parsed.tzinfo is None:
-                    parsed = IST.localize(parsed)
+                    parsed = timezone.localize(parsed)
                 else:
-                    parsed = parsed.astimezone(IST)
+                    parsed = parsed.astimezone(timezone)
                 return parsed
             except ValueError:
                 return None
@@ -386,22 +477,26 @@ Respond with ONLY the ISO datetime string in IST timezone, nothing else. If you 
             logger.warning(f"Gemini datetime parsing error: {e}")
             return None
     
-    def _parse_datetime_fallback(self, datetime_str: str) -> Optional[datetime]:
+    def _parse_datetime_fallback(self, datetime_str: str, timezone: Optional[pytz.timezone] = None) -> Optional[datetime]:
         """
         Fallback datetime parsing using simple patterns.
         
         Args:
             datetime_str: Datetime string
+            timezone: Target timezone (defaults to IST)
             
         Returns:
-            Datetime object in IST or None
+            Datetime object in specified timezone or None
         """
-        now_ist = datetime.now(IST)
+        if timezone is None:
+            timezone = IST
+        
+        now_tz = datetime.now(timezone)
         datetime_lower = datetime_str.lower()
         
         # Relative times
         if "tomorrow" in datetime_lower:
-            base_date = now_ist + timedelta(days=1)
+            base_date = now_tz + timedelta(days=1)
             # Extract time if mentioned
             hour, minute = self._extract_time(datetime_str, base_date)
             return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -412,7 +507,7 @@ Respond with ONLY the ISO datetime string in IST timezone, nothing else. If you 
             match = re.search(r'in\s+(\d+)\s*(?:hour|hr)', datetime_lower)
             if match:
                 hours = int(match.group(1))
-                return now_ist + timedelta(hours=hours)
+                return now_tz + timedelta(hours=hours)
         
         elif "in" in datetime_lower and ("minute" in datetime_lower or "min" in datetime_lower):
             # "in 30 minutes"
@@ -420,16 +515,16 @@ Respond with ONLY the ISO datetime string in IST timezone, nothing else. If you 
             match = re.search(r'in\s+(\d+)\s*(?:minute|min)', datetime_lower)
             if match:
                 minutes = int(match.group(1))
-                return now_ist + timedelta(minutes=minutes)
+                return now_tz + timedelta(minutes=minutes)
         
         # Try to parse common date formats
         try:
             # Try ISO format
             parsed = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
             if parsed.tzinfo is None:
-                parsed = IST.localize(parsed)
+                parsed = timezone.localize(parsed)
             else:
-                parsed = parsed.astimezone(IST)
+                parsed = parsed.astimezone(timezone)
             return parsed
         except:
             pass
