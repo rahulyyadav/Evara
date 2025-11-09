@@ -50,10 +50,10 @@ class Settings(BaseSettings):
                     pass
         return v if v is not None else 8000
     
-    # Meta (Facebook) WhatsApp Business API (Required)
-    META_ACCESS_TOKEN: str = Field(..., env="META_ACCESS_TOKEN")
-    PHONE_NUMBER_ID: str = Field(..., env="PHONE_NUMBER_ID")
-    META_VERIFY_TOKEN: str = Field(..., env="META_VERIFY_TOKEN")
+    # Meta (Facebook) WhatsApp Business API (Required for WhatsApp, but allow app to start without them)
+    META_ACCESS_TOKEN: Optional[str] = Field(default=None, env="META_ACCESS_TOKEN")
+    PHONE_NUMBER_ID: Optional[str] = Field(default=None, env="PHONE_NUMBER_ID")
+    META_VERIFY_TOKEN: Optional[str] = Field(default=None, env="META_VERIFY_TOKEN")
     WHATSAPP_BUSINESS_ID: Optional[str] = Field(default=None, env="WHATSAPP_BUSINESS_ID")
     
     # Google Gemini API (Optional - for AI features)
@@ -110,31 +110,67 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-# Will raise ValidationError if required fields are missing
+# Allow app to start even if some env vars are missing (for health checks)
 try:
     settings = Settings()
+    # Warn if critical vars are missing but don't crash
+    if not settings.META_ACCESS_TOKEN or not settings.PHONE_NUMBER_ID or not settings.META_VERIFY_TOKEN:
+        import logging
+        logger = logging.getLogger("taskflow")
+        logger.warning("⚠️  Meta WhatsApp environment variables not fully configured:")
+        if not settings.META_ACCESS_TOKEN:
+            logger.warning("  - META_ACCESS_TOKEN is missing")
+        if not settings.PHONE_NUMBER_ID:
+            logger.warning("  - PHONE_NUMBER_ID is missing")
+        if not settings.META_VERIFY_TOKEN:
+            logger.warning("  - META_VERIFY_TOKEN is missing")
+        logger.warning("  WhatsApp webhook will not work, but app will start for health checks.")
 except Exception as e:
     import sys
-    print(f"❌ Configuration Error: {e}", file=sys.stderr)
-    print("\nPlease ensure all required environment variables are set:")
-    print("  - META_ACCESS_TOKEN")
-    print("  - PHONE_NUMBER_ID")
-    print("  - META_VERIFY_TOKEN")
-    print("\nOptional variables:")
-    print("  - GEMINI_API_KEY (for AI features)")
-    print("  - SERPAPI_KEY (for flight search)")
-    print("  - WHATSAPP_BUSINESS_ID")
-    print("  - ENVIRONMENT (dev/prod, defaults to dev)")
-    print("  - LOG_LEVEL (defaults to INFO)")
-    print("\nSee .env.example for template.")
-    sys.exit(1)
+    import logging
+    logger = logging.getLogger("taskflow")
+    logger.error(f"❌ Configuration Error: {e}")
+    logger.error("App will start but may have limited functionality.")
+    # Create minimal settings to allow app to start
+    from pathlib import Path
+    class MinimalSettings:
+        APP_NAME = "Evara"
+        APP_VERSION = "1.0.0"
+        ENVIRONMENT = "prod"
+        DEBUG = False
+        HOST = "0.0.0.0"
+        PORT = 8000
+        META_ACCESS_TOKEN = None
+        PHONE_NUMBER_ID = None
+        META_VERIFY_TOKEN = None
+        GEMINI_API_KEY = None
+        SERPAPI_KEY = None
+        MEMORY_FILE = "user_memory.json"
+        DATA_DIR = Path(__file__).parent.parent / "data"
+        LOGS_DIR = Path(__file__).parent.parent / "logs"
+        # Ensure directories exist
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    settings = MinimalSettings()
 
 
 def get_memory_file_path() -> Path:
     """Get the full path to the memory file."""
-    return settings.DATA_DIR / settings.MEMORY_FILE
+    if hasattr(settings, 'DATA_DIR') and settings.DATA_DIR:
+        return settings.DATA_DIR / settings.MEMORY_FILE
+    # Fallback if DATA_DIR not set
+    from pathlib import Path
+    data_dir = Path(__file__).parent.parent / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / settings.MEMORY_FILE
 
 
 def get_log_file_path() -> Path:
     """Get the full path to the log file."""
-    return settings.LOGS_DIR / "evara.log"
+    if hasattr(settings, 'LOGS_DIR') and settings.LOGS_DIR:
+        return settings.LOGS_DIR / "evara.log"
+    # Fallback if LOGS_DIR not set
+    from pathlib import Path
+    logs_dir = Path(__file__).parent.parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return logs_dir / "evara.log"

@@ -31,6 +31,7 @@ class FlightSearchTool:
     # Cache duration: 1 hour
     CACHE_DURATION = timedelta(hours=1)
     
+    
     def __init__(self):
         """Initialize the flight search tool."""
         self.cache: Dict[str, Dict[str, Any]] = {}
@@ -119,6 +120,20 @@ class FlightSearchTool:
                 "message": "I couldn't understand the date. Please specify a date like 'Dec 15', 'next Friday', or '2024-12-15'.",
                 "tool": "flight_search"
             }
+        
+        # Validate date is in the future
+        try:
+            parsed_dt = datetime.strptime(parsed_date, "%Y-%m-%d")
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            if parsed_dt < today:
+                return {
+                    "success": False,
+                    "needs_clarification": True,
+                    "message": f"That date ({parsed_date}) is in the past. Please provide a future date for your flight search.",
+                    "tool": "flight_search"
+                }
+        except ValueError:
+            pass  # Date format is already validated in _parse_date
         
         # Check cache
         cache_key = self._get_cache_key(origin, destination, parsed_date)
@@ -289,6 +304,63 @@ Respond with ONLY the date in YYYY-MM-DD format, nothing else. If you cannot par
             logger.warning(f"Gemini date parsing error: {e}")
             return None
     
+    async def _get_airport_code(self, city_name: str) -> Optional[str]:
+        """
+        Get airport code (IATA) for a city name using Gemini.
+        
+        Args:
+            city_name: City name (e.g., "Chennai", "Mumbai", "Bagdogra")
+            
+        Returns:
+            Airport code (e.g., "MAA", "BOM", "IXB") or None if not found
+        """
+        # If it's already a 3-letter uppercase code, return it
+        if len(city_name.strip()) == 3 and city_name.strip().isupper():
+            return city_name.strip()
+        
+        # If Gemini is not available, return None
+        if not self.gemini_model:
+            logger.warning("Gemini not available for airport code conversion")
+            return None
+        
+        try:
+            prompt = f"""Convert this city name to its IATA airport code (3-letter uppercase code).
+
+City: "{city_name}"
+
+Examples:
+- "Chennai" -> "MAA"
+- "Mumbai" -> "BOM"
+- "Delhi" -> "DEL"
+- "Bagdogra" -> "IXB"
+- "New York" -> "JFK"
+- "London" -> "LHR"
+
+Respond with ONLY the 3-letter uppercase airport code, nothing else. If you cannot find the airport code, respond with "null"."""
+            
+            response = self.gemini_model.generate_content(prompt)
+            code = response.text.strip().upper()
+            
+            # Validate it's a 3-letter code
+            if len(code) == 3 and code.isalpha():
+                logger.info(f"✅ Converted '{city_name}' to airport code: {code}")
+                return code
+            elif code.lower() == "null":
+                logger.warning(f"⚠️  Could not find airport code for '{city_name}'")
+                return None
+            else:
+                # Try to extract 3-letter code from response
+                import re
+                match = re.search(r'\b([A-Z]{3})\b', code)
+                if match:
+                    return match.group(1)
+                logger.warning(f"⚠️  Invalid airport code format for '{city_name}': {code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting airport code for '{city_name}': {e}")
+            return None
+    
     async def _call_serpapi(
         self,
         origin: str,
@@ -318,23 +390,76 @@ Respond with ONLY the date in YYYY-MM-DD format, nothing else. If you cannot par
         # SerpAPI Google Flights endpoint
         url = "https://serpapi.com/search"
         
-        # SerpAPI expects airport codes or city names
-        # We'll use the origin/destination as-is (they might be city names or codes)
+        # Convert city names to airport codes using Gemini
+        origin_code = await self._get_airport_code(origin)
+        destination_code = await self._get_airport_code(destination)
+        
+        # If we couldn't get airport codes, use the original (might already be codes)
+        departure_id = origin_code if origin_code else origin.upper()
+        arrival_id = destination_code if destination_code else destination.upper()
+        
+        # SerpAPI expects uppercase 3-letter airport codes
+        # For one-way flights, omit the 'type' parameter or use '1' for round trip (but we need return_date then)
         params = {
             "engine": "google_flights",
             "api_key": settings.SERPAPI_KEY,
-            "departure_id": origin,
-            "arrival_id": destination,
+            "departure_id": departure_id,
+            "arrival_id": arrival_id,
             "outbound_date": date,
             "currency": "INR",
             "hl": "en",
-            "gl": "in",  # India
-            "type": 1  # One-way flight
+            "gl": "in"  # India
+            # Note: Omitting 'type' parameter for one-way flights
         }
+        
+        logger.info(f"Using airport codes: {departure_id} -> {arrival_id}")
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, params=params)
+                
+                # Log the request for debugging
+                logger.debug(f"SerpAPI request URL: {response.request.url}")
+                
+                # Check for 400 errors and get detailed error message
+                if response.status_code == 400:
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get("error", "Bad Request")
+                        logger.error(f"SerpAPI 400 error: {error_msg}")
+                        logger.error(f"Request params: {params}")
+                        
+                        # Check if we successfully converted to airport codes
+                        if origin_code and destination_code:
+                            # We used airport codes but still got 400 - route might not exist or date issue
+                            return {
+                                "success": False,
+                                "message": f"I couldn't find flights from {origin} ({departure_id}) to {destination} ({arrival_id}) on {date}. The route might not have flights on that date, or please try a different date.",
+                                "tool": "flight_search",
+                                "error_type": "invalid_route"
+                            }
+                        else:
+                            # We couldn't convert to airport codes - suggest using codes
+                            missing = []
+                            if not origin_code:
+                                missing.append(f"{origin}")
+                            if not destination_code:
+                                missing.append(f"{destination}")
+                            
+                            return {
+                                "success": False,
+                                "message": f"I couldn't find airport codes for: {', '.join(missing)}. Please try using airport codes directly (e.g., MAA for Chennai, BOM for Mumbai, IXB for Bagdogra).",
+                                "tool": "flight_search",
+                                "error_type": "invalid_route"
+                            }
+                    except:
+                        return {
+                            "success": False,
+                            "message": f"I couldn't find flights from {origin} to {destination}. Please check the city names or try using airport codes (e.g., 'MAA' for Chennai, 'IXB' for Bagdogra).",
+                            "tool": "flight_search",
+                            "error_type": "invalid_route"
+                        }
+                
                 response.raise_for_status()
                 data = response.json()
                 
@@ -365,10 +490,26 @@ Respond with ONLY the date in YYYY-MM-DD format, nothing else. If you cannot par
                     "tool": "flight_search",
                     "error_type": "quota_exceeded"
                 }
+            elif e.response.status_code == 400:
+                # This shouldn't happen since we handle 400 above, but just in case
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get("error", "Invalid request parameters")
+                    logger.error(f"SerpAPI 400 error in exception handler: {error_msg}")
+                except:
+                    pass
+                return {
+                    "success": False,
+                    "message": f"I couldn't find flights from {origin} to {destination} on {date}. Please check the city names or try using airport codes (e.g., MAA for Chennai, IXB for Bagdogra).",
+                    "tool": "flight_search",
+                    "error_type": "invalid_request"
+                }
             logger.error(f"SerpAPI HTTP error: {e}")
+            logger.error(f"Response status: {e.response.status_code}")
+            logger.error(f"Response text: {e.response.text[:500] if hasattr(e.response, 'text') else 'No response text'}")
             return {
                 "success": False,
-                "message": f"Failed to search flights: HTTP {e.response.status_code}",
+                "message": f"Failed to search flights: HTTP {e.response.status_code}. Please try again later.",
                 "tool": "flight_search"
             }
         except httpx.TimeoutException:

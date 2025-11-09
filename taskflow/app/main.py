@@ -154,13 +154,17 @@ async def lifespan(app: FastAPI):
     # Initialize Meta WhatsApp Business API client (required)
     try:
         if not settings.META_ACCESS_TOKEN or not settings.PHONE_NUMBER_ID:
-            raise ValueError("META_ACCESS_TOKEN and PHONE_NUMBER_ID must be provided")
-        meta_client = MetaWhatsAppClient()
-        logger.info("✅ Meta WhatsApp client initialized successfully")
-        logger.info(f"   Phone Number ID: {settings.PHONE_NUMBER_ID}")
+            logger.warning("⚠️  META_ACCESS_TOKEN or PHONE_NUMBER_ID not set - Meta client will not be available")
+            meta_client = None
+        else:
+            meta_client = MetaWhatsAppClient()
+            logger.info("✅ Meta WhatsApp client initialized successfully")
+            logger.info(f"   Phone Number ID: {settings.PHONE_NUMBER_ID}")
     except Exception as e:
         logger.error(f"❌ Failed to initialize Meta WhatsApp client: {e}")
-        raise
+        logger.warning("⚠️  Continuing without Meta client - webhook will not work but app will start")
+        meta_client = None
+        # Don't raise - allow app to start for health checks
     
     # Initialize Agent Orchestrator (caches Gemini client)
     try:
@@ -263,9 +267,17 @@ async def lifespan(app: FastAPI):
 
 
 # Initialize FastAPI app
+# Use try-except to ensure app always initializes even if settings fail
+try:
+    app_title = settings.APP_NAME
+    app_version = settings.APP_VERSION
+except:
+    app_title = "Evara"
+    app_version = "1.0.0"
+
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
+    title=app_title,
+    version=app_version,
     description="WhatsApp AI Task Automation Agent",
     lifespan=lifespan,
 )
@@ -357,14 +369,22 @@ async def process_incoming_message(from_number: str, message_body: str) -> str:
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "environment": settings.ENVIRONMENT
-    }
+    """Health check endpoint - must be fast and never fail."""
+    try:
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT
+        }
+    except Exception as e:
+        # Even if there's an error, return something so Render doesn't think the app is down
+        return {
+            "status": "starting",
+            "error": str(e)[:100],
+            "app": "Evara"
+        }
 
 
 @app.get("/health")
