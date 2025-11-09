@@ -139,7 +139,7 @@ class MetaWhatsAppClient:
             token = request.query_params.get("hub.verify_token")
             challenge = request.query_params.get("hub.challenge")
             
-            verify_token = getattr(settings, "META_VERIFY_TOKEN", "taskflow_verify_token")
+            verify_token = getattr(settings, "META_VERIFY_TOKEN", "evara_verify_token")
             
             if mode == "subscribe" and token == verify_token:
                 logger.info("✅ Meta webhook verification successful")

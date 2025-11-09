@@ -1,5 +1,5 @@
 """
-Configuration management for TaskFlow.
+Configuration management for Evara.
 Loads environment variables and provides centralized config access.
 Uses pydantic BaseSettings for validation and type safety.
 """
@@ -14,18 +14,19 @@ class Settings(BaseSettings):
     Application settings loaded from environment variables.
     
     Required variables:
-    - TWILIO_ACCOUNT_SID
-    - TWILIO_AUTH_TOKEN
-    - TWILIO_WHATSAPP_NUMBER
+    - META_ACCESS_TOKEN
+    - PHONE_NUMBER_ID
+    - META_VERIFY_TOKEN
     
     Optional variables:
     - GEMINI_API_KEY (for AI features)
     - SERPAPI_KEY (for flight search)
     - ENVIRONMENT (dev/prod, defaults to dev)
+    - WHATSAPP_BUSINESS_ID (optional, for Meta integration)
     """
     
     # Application
-    APP_NAME: str = "TaskFlow"
+    APP_NAME: str = "Evara"
     APP_VERSION: str = "1.0.0"
     ENVIRONMENT: str = Field(default="dev", env="ENVIRONMENT")
     DEBUG: bool = Field(default=False, env="DEBUG")
@@ -49,17 +50,11 @@ class Settings(BaseSettings):
                     pass
         return v if v is not None else 8000
     
-    # Twilio WhatsApp (Optional - for Twilio integration)
-    TWILIO_ACCOUNT_SID: Optional[str] = Field(default=None, env="TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH_TOKEN: Optional[str] = Field(default=None, env="TWILIO_AUTH_TOKEN")
-    TWILIO_WHATSAPP_NUMBER: Optional[str] = Field(default=None, env="TWILIO_WHATSAPP_NUMBER")
-    TWILIO_WEBHOOK_URL: Optional[str] = Field(default=None, env="TWILIO_WEBHOOK_URL")
-    
-    # Meta (Facebook) WhatsApp Business API (Required for Meta integration)
-    META_ACCESS_TOKEN: Optional[str] = Field(default=None, env="META_ACCESS_TOKEN")
-    PHONE_NUMBER_ID: Optional[str] = Field(default=None, env="PHONE_NUMBER_ID")
+    # Meta (Facebook) WhatsApp Business API (Required)
+    META_ACCESS_TOKEN: str = Field(..., env="META_ACCESS_TOKEN")
+    PHONE_NUMBER_ID: str = Field(..., env="PHONE_NUMBER_ID")
+    META_VERIFY_TOKEN: str = Field(..., env="META_VERIFY_TOKEN")
     WHATSAPP_BUSINESS_ID: Optional[str] = Field(default=None, env="WHATSAPP_BUSINESS_ID")
-    META_VERIFY_TOKEN: str = Field(default="taskflow_verify_token", env="META_VERIFY_TOKEN")
     
     # Google Gemini API (Optional - for AI features)
     GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
@@ -78,14 +73,6 @@ class Settings(BaseSettings):
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         env="LOG_FORMAT"
     )
-    
-    @field_validator("TWILIO_WHATSAPP_NUMBER")
-    @classmethod
-    def validate_whatsapp_number(cls, v: str) -> str:
-        """Ensure WhatsApp number has correct format."""
-        if v and not v.startswith("whatsapp:"):
-            return f"whatsapp:{v}"
-        return v
     
     @field_validator("ENVIRONMENT")
     @classmethod
@@ -130,9 +117,15 @@ except Exception as e:
     import sys
     print(f"❌ Configuration Error: {e}", file=sys.stderr)
     print("\nPlease ensure all required environment variables are set:")
-    print("  - TWILIO_ACCOUNT_SID")
-    print("  - TWILIO_AUTH_TOKEN")
-    print("  - TWILIO_WHATSAPP_NUMBER")
+    print("  - META_ACCESS_TOKEN")
+    print("  - PHONE_NUMBER_ID")
+    print("  - META_VERIFY_TOKEN")
+    print("\nOptional variables:")
+    print("  - GEMINI_API_KEY (for AI features)")
+    print("  - SERPAPI_KEY (for flight search)")
+    print("  - WHATSAPP_BUSINESS_ID")
+    print("  - ENVIRONMENT (dev/prod, defaults to dev)")
+    print("  - LOG_LEVEL (defaults to INFO)")
     print("\nSee .env.example for template.")
     sys.exit(1)
 
@@ -144,4 +137,4 @@ def get_memory_file_path() -> Path:
 
 def get_log_file_path() -> Path:
     """Get the full path to the log file."""
-    return settings.LOGS_DIR / "taskflow.log"
+    return settings.LOGS_DIR / "evara.log"

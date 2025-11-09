@@ -457,7 +457,7 @@ Important:
             if tool_result:
                 tool_info = f"\nTool execution result:\n{json.dumps(tool_result, indent=2)}"
             
-            prompt = f"""You are TaskFlow, a helpful WhatsApp AI assistant that helps users with:
+            prompt = f"""You are Evara, a helpful WhatsApp AI assistant that helps users with:
 - Flight searches
 - Price tracking
 - Reminders
@@ -544,7 +544,7 @@ Respond directly with the message text, no JSON or code blocks."""
             self.INTENT_PRICE_TRACK: "I can help you track product prices! Send me a product name or URL.",
             self.INTENT_REMINDER: "I can set reminders for you! What would you like to be reminded about?",
             self.INTENT_STATUS_CHECK: "Let me check your tracked items and reminders...",
-            self.INTENT_GENERAL: "Hello! I'm TaskFlow, your AI assistant. I can help with flights, price tracking, and reminders. What would you like to do?"
+            self.INTENT_GENERAL: "Hello! I'm Evara, your AI assistant. I can help with flights, price tracking, and reminders. What would you like to do?"
         }
         
         return responses.get(intent, "How can I help you today?")

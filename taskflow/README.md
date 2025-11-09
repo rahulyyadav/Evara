@@ -1,11 +1,11 @@
-# 🤖 TaskFlow - WhatsApp AI Task Automation Agent
+# 🤖 Evara - WhatsApp AI Task Automation Agent
 
-TaskFlow is a production-grade WhatsApp AI agent that helps you automate tasks through natural conversations. Built with FastAPI, Twilio, and Google Gemini AI.
+Evara is a production-grade WhatsApp AI agent that helps you automate tasks through natural conversations. Built with FastAPI, Meta WhatsApp Business API, and Google Gemini AI.
 
 ## 📋 Current Status: Phase 7 Complete ✅
 
 **All Phases Implemented:**
-- ✅ Phase 1: FastAPI + Twilio WhatsApp webhook
+- ✅ Phase 1: FastAPI + Meta WhatsApp Business API webhook
 - ✅ Phase 2: AI agent orchestration with Google Gemini
 - ✅ Phase 3: Flight search with SerpAPI
 - ✅ Phase 4: Price tracking with Playwright
@@ -16,7 +16,7 @@ TaskFlow is a production-grade WhatsApp AI agent that helps you automate tasks t
 ## 🚀 Tech Stack
 
 - **Backend:** Python 3.11+ with FastAPI
-- **WhatsApp:** Twilio WhatsApp Sandbox/Production
+- **WhatsApp:** Meta WhatsApp Business API
 - **AI:** Google Gemini 1.5 Flash
 - **Tools:** SerpAPI (flight search), Playwright (web scraping)
 - **Storage:** JSON file storage with thread-safe operations and backups
@@ -28,7 +28,7 @@ TaskFlow is a production-grade WhatsApp AI agent that helps you automate tasks t
 ### Prerequisites
 
 - Python 3.11 or higher
-- Twilio account with WhatsApp enabled
+- Meta WhatsApp Business API credentials
 - Google Gemini API key (for AI features)
 - SerpAPI key (for flight search, optional)
 - Playwright with Chromium (for price tracking, optional)
@@ -65,9 +65,9 @@ cp .env.example .env
 Edit `.env` with your actual credentials:
 
 **Required:**
-- `TWILIO_ACCOUNT_SID`: From [Twilio Console](https://console.twilio.com/)
-- `TWILIO_AUTH_TOKEN`: From [Twilio Console](https://console.twilio.com/)
-- `TWILIO_WHATSAPP_NUMBER`: Your Twilio WhatsApp number (sandbox: `whatsapp:+14155238886`)
+- `META_ACCESS_TOKEN`: From [Meta Developer Console](https://developers.facebook.com/)
+- `PHONE_NUMBER_ID`: Your WhatsApp Business phone number ID
+- `META_VERIFY_TOKEN`: Webhook verification token (use a strong random string)
 
 **Optional (for full functionality):**
 - `GEMINI_API_KEY`: From [Google AI Studio](https://makersuite.google.com/app/apikey)
@@ -105,7 +105,7 @@ gunicorn app.main:app \
   --log-level info
 ```
 
-## 🌐 Twilio Webhook Setup
+## 🌐 Meta WhatsApp Webhook Setup
 
 1. **Start your application** (locally or deployed)
 
@@ -115,18 +115,16 @@ gunicorn app.main:app \
 ngrok http 8000
 ```
 
-3. **Configure Twilio Webhook:**
-   - Go to [Twilio Console → WhatsApp Sandbox](https://console.twilio.com/us1/develop/sms/settings/whatsapp-sandbox)
-   - Set "WHEN A MESSAGE COMES IN" to: `https://your-url.com/webhook`
-   - Method: `HTTP POST`
-   - Save
+3. **Configure Meta Webhook:**
+   - Go to [Meta Developer Console](https://developers.facebook.com/apps)
+   - Select your app → WhatsApp → Configuration
+   - Set **Webhook URL**: `https://your-url.com/webhook`
+   - Set **Verify Token**: Same as your `META_VERIFY_TOKEN` env variable
+   - Subscribe to `messages` field
+   - Click "Verify and Save"
 
-4. **Join the sandbox:**
-   - Send "join [sandbox-code]" to your Twilio WhatsApp number
-   - The sandbox code is shown in the Twilio console
-
-5. **Test the bot:**
-   - Send any message to test the bot
+4. **Test the bot:**
+   - Send any message to your WhatsApp Business number
    - Try: "Find flights from Delhi to Mumbai"
 
 ## 📡 API Endpoints
@@ -135,7 +133,7 @@ ngrok http 8000
 Health check endpoint
 ```json
 {
-  "app": "TaskFlow",
+  "app": "Evara",
   "version": "1.0.0",
   "status": "healthy",
   "environment": "dev"
@@ -147,15 +145,15 @@ Detailed health status
 ```json
 {
   "status": "healthy",
-  "app": "TaskFlow",
+  "app": "Evara",
   "version": "1.0.0",
   "environment": "dev",
-  "twilio_configured": true
+  "meta_configured": true
 }
 ```
 
 ### `POST /webhook`
-Twilio WhatsApp webhook endpoint (receives messages from users)
+Meta WhatsApp Business API webhook endpoint (receives messages from users)
 
 ### `GET /webhook`
 Webhook validation endpoint
@@ -192,7 +190,7 @@ Have natural conversations with the AI agent
 
 Logs are written to both:
 - **Console:** Simple format for development
-- **File:** `logs/taskflow.log` with rotation (10MB max, 5 backups)
+- **File:** `logs/evara.log` with rotation (10MB max, 5 backups)
 
 Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
@@ -200,7 +198,7 @@ Configure via `LOG_LEVEL` in `.env`
 
 ## 🔒 Security Features
 
-- ✅ Twilio request signature validation
+- ✅ Meta webhook verification
 - ✅ Environment variable configuration (no hardcoded credentials)
 - ✅ Secure token handling
 - ✅ Input validation with Pydantic
@@ -213,7 +211,7 @@ Configure via `LOG_LEVEL` in `.env`
 taskflow/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              # FastAPI app & Twilio webhook
+│   ├── main.py              # FastAPI app & Meta WhatsApp webhook
 │   ├── config.py            # Configuration management (Pydantic)
 │   ├── agent.py             # AI agent orchestration
 │   ├── tools/               # Automation tools
@@ -282,19 +280,19 @@ See [TESTING_GUIDE.md](TESTING_GUIDE.md) for detailed testing instructions.
    - Start Command: `gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT`
 
 3. **Add environment variables** in Render dashboard:
-   - `TWILIO_ACCOUNT_SID`
-   - `TWILIO_AUTH_TOKEN`
-   - `TWILIO_WHATSAPP_NUMBER`
+   - `META_ACCESS_TOKEN`
+   - `PHONE_NUMBER_ID`
+   - `META_VERIFY_TOKEN`
    - `GEMINI_API_KEY`
    - `SERPAPI_KEY` (optional)
    - `ENVIRONMENT=prod`
 
-4. **Update Twilio webhook** with Render URL
+4. **Update Meta webhook** with Render URL
 
 ### Environment Variables for Production
 
 Make sure to set all required variables in your deployment platform:
-- Required: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER`
+- Required: `META_ACCESS_TOKEN`, `PHONE_NUMBER_ID`, `META_VERIFY_TOKEN`
 - Recommended: `GEMINI_API_KEY`, `SERPAPI_KEY`
 - Optional: `ENVIRONMENT=prod`, `LOG_LEVEL=INFO`
 
@@ -328,13 +326,13 @@ See `.env.example` for all available variables.
 
 ### Agent Orchestration Flow
 
-1. **Message Reception**: Twilio webhook receives WhatsApp message
+1. **Message Reception**: Meta WhatsApp webhook receives WhatsApp message
 2. **Intent Classification**: Gemini AI classifies user intent
 3. **Tool Selection**: Agent selects appropriate tool based on intent
 4. **Tool Execution**: Tool performs the requested action
 5. **Response Generation**: Gemini AI generates natural language response
 6. **Memory Storage**: Conversation saved to persistent memory
-7. **Message Sending**: Response sent via Twilio WhatsApp API
+7. **Message Sending**: Response sent via Meta WhatsApp Business API
 
 ### Memory System
 
@@ -365,14 +363,16 @@ See `.env.example` for all available variables.
 
 ## 📖 Documentation
 
-- [TESTING_GUIDE.md](TESTING_GUIDE.md) - How to test features
-- [CHROMIUM_NEEDED.md](CHROMIUM_NEEDED.md) - Playwright/Chromium requirements
+- [docs/TESTING_GUIDE.md](../docs/TESTING_GUIDE.md) - How to test features
+- [docs/CHROMIUM_NEEDED.md](../docs/CHROMIUM_NEEDED.md) - Playwright/Chromium requirements
+- [docs/DEPLOYMENT_GUIDE.md](../docs/DEPLOYMENT_GUIDE.md) - Deployment instructions
+- [docs/META_SETUP_GUIDE.md](../docs/META_SETUP_GUIDE.md) - Meta WhatsApp setup
 - API Documentation: `http://localhost:8000/docs` (when running)
 
 ## 🤝 Contributing
 
 This is a phased development project. Each phase builds upon the previous one:
-- **Phase 1:** ✅ FastAPI + Twilio WhatsApp webhook
+- **Phase 1:** ✅ FastAPI + Meta WhatsApp Business API webhook
 - **Phase 2:** ✅ AI integration with Gemini
 - **Phase 3:** ✅ Flight search
 - **Phase 4:** ✅ Price tracking
@@ -388,23 +388,25 @@ MIT License
 
 ### Issue: Configuration Error on Startup
 **Solution:** Ensure all required environment variables are set in `.env`:
-- `TWILIO_ACCOUNT_SID`
-- `TWILIO_AUTH_TOKEN`
-- `TWILIO_WHATSAPP_NUMBER`
+- `META_ACCESS_TOKEN`
+- `PHONE_NUMBER_ID`
+- `META_VERIFY_TOKEN`
 
-### Issue: Twilio signature validation fails
-**Solution:** Ensure your webhook URL matches exactly what's in Twilio (including https/http and trailing slashes)
+### Issue: Meta webhook verification fails
+**Solution:** Ensure your verify token in Meta console exactly matches `META_VERIFY_TOKEN` in your environment variables
 
 ### Issue: Messages not being received
 **Solution:** 
-- Check Twilio sandbox is active
-- Verify webhook URL is correct
-- Check logs for errors: `tail -f logs/taskflow.log`
+- Check Meta webhook is configured correctly
+- Verify webhook URL is correct and accessible
+- Ensure webhook is subscribed to `messages` field
+- Check logs for errors: `tail -f logs/evara.log`
 
 ### Issue: Cannot send messages
 **Solution:**
-- Verify `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are correct
-- Ensure `TWILIO_WHATSAPP_NUMBER` has `whatsapp:` prefix
+- Verify `META_ACCESS_TOKEN` is valid and not expired
+- Check `PHONE_NUMBER_ID` is correct
+- Ensure your phone number is added as a test number in Meta console
 
 ### Issue: Gemini API errors
 **Solution:**
@@ -427,8 +429,8 @@ MIT License
 ## 📞 Support
 
 For issues and questions:
-- Check the logs: `logs/taskflow.log`
-- Review Twilio debugger: https://console.twilio.com/monitor/debugger
+- Check the logs: `logs/evara.log`
+- Review Meta webhook logs: https://developers.facebook.com/apps → Your App → WhatsApp → Webhooks
 - Verify environment variables are set correctly
 - Check API keys are valid and have quota
 

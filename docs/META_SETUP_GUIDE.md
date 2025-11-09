@@ -28,8 +28,10 @@ These are in your `.env` file.
 3. **Add Webhook URL**
 
    - **Callback URL**: `https://your-render-url.onrender.com/webhook`
-   - **Verify Token**: `taskflow_verify_token` (or whatever you set in `.env` as `META_VERIFY_TOKEN`)
+   - **Verify Token**: Use the same value as your `META_VERIFY_TOKEN` in `.env` file
    - Click "Verify and Save"
+   
+   **Security Note**: Use a strong, unique verify token. Never commit it to your code repository.
 
 4. **Subscribe to Webhook Fields**
    - Check: `messages`
@@ -120,11 +122,19 @@ Meta requires webhook verification on first setup:
 Make sure your `.env` has:
 
 ```bash
+# Required - Set these in your .env file
 META_ACCESS_TOKEN=your_access_token
 PHONE_NUMBER_ID=your_phone_number_id
+META_VERIFY_TOKEN=your_strong_unique_verify_token_here
+
+# Optional
 WHATSAPP_BUSINESS_ID=your_business_id
-META_VERIFY_TOKEN=taskflow_verify_token
 ```
+
+**Security Best Practices:**
+- Use a strong, random string for META_VERIFY_TOKEN (e.g., generate with: `openssl rand -hex 32`)
+- Never commit your `.env` file to version control
+- Use different verify tokens for development and production
 
 ---
 

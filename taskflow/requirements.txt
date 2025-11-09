@@ -1,13 +1,10 @@
-# TaskFlow - Requirements
+# Evara - Requirements
 # Python 3.11+
 
 # Web Framework
 fastapi>=0.104.1
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
-
-# Twilio WhatsApp Integration
-twilio>=8.10.0
 
 # Configuration Management
 pydantic>=2.9.0

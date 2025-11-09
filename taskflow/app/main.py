@@ -1,6 +1,6 @@
 """
-TaskFlow - WhatsApp AI Task Automation Agent
-Main FastAPI application with Twilio webhook integration.
+Evara - WhatsApp AI Task Automation Agent
+Main FastAPI application with Meta WhatsApp Business API integration.
 """
 import asyncio
 import logging
@@ -9,12 +9,9 @@ from typing import Optional
 from datetime import datetime
 import pytz
 
-from fastapi import FastAPI, Request, Form, HTTPException, status
-from fastapi.responses import Response, PlainTextResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
-from twilio.rest import Client
-from twilio.request_validator import RequestValidator
-import httpx
 
 from .config import settings, get_log_file_path, get_memory_file_path
 from .utils.logger import setup_logging
@@ -23,16 +20,14 @@ from .utils.messages import get_welcome_message, get_help_message, get_friendly_
 from .agent import AgentOrchestrator
 from .tools.reminder import ReminderTool
 from .memory import MemoryStore
+from .services.meta_whatsapp import MetaWhatsAppClient
 
 
 # Setup logging
 logger = setup_logging()
 
-# WhatsApp client (Meta or Twilio)
+# WhatsApp client (Meta only)
 meta_client: Optional[MetaWhatsAppClient] = None
-twilio_client: Optional[Client] = None
-request_validator: Optional[RequestValidator] = None
-use_meta: bool = False  # Flag to determine which service to use
 
 # Agent orchestrator
 agent: Optional[AgentOrchestrator] = None
@@ -98,11 +93,8 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
                             f"Want me to snooze for 1 hour?"
                         )
                         
-                        # Format user number for WhatsApp
-                        if not user_number.startswith("whatsapp:"):
-                            whatsapp_number = f"whatsapp:{user_number}"
-                        else:
-                            whatsapp_number = user_number
+                        # Format user number for WhatsApp (Meta uses +1234567890 format)
+                        whatsapp_number = user_number.replace("whatsapp:", "") if user_number.startswith("whatsapp:") else user_number
                         
                         success = await send_whatsapp_message(whatsapp_number, message)
                         
@@ -139,9 +131,9 @@ async def lifespan(app: FastAPI):
     startup_start = time.time()
     
     # Startup
-    global twilio_client, request_validator, agent, _reminder_checker_task, rate_limiter, meta_client, use_meta
+    global agent, _reminder_checker_task, rate_limiter, meta_client
     
-    logger.info("🚀 Starting TaskFlow application...")
+    logger.info("🚀 Starting Evara application...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info(f"Port: {settings.PORT}")
@@ -159,32 +151,16 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Could not preload memory store: {e}")
         memory_store = None
     
-    # Initialize WhatsApp client (Meta or Twilio)
-    use_meta = bool(settings.META_ACCESS_TOKEN and settings.PHONE_NUMBER_ID)
-    
-    if use_meta:
-        # Use Meta WhatsApp Business API
-        try:
-            meta_client = MetaWhatsAppClient()
-            logger.info("✅ Meta WhatsApp client initialized successfully")
-            logger.info(f"   Phone Number ID: {settings.PHONE_NUMBER_ID}")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize Meta WhatsApp client: {e}")
-            raise
-    else:
-        # Use Twilio (fallback)
-        try:
-            if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
-                raise ValueError("Either Meta or Twilio credentials must be provided")
-            twilio_client = Client(
-                settings.TWILIO_ACCOUNT_SID,
-                settings.TWILIO_AUTH_TOKEN
-            )
-            request_validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
-            logger.info("✅ Twilio client initialized successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize Twilio client: {e}")
-            raise
+    # Initialize Meta WhatsApp Business API client (required)
+    try:
+        if not settings.META_ACCESS_TOKEN or not settings.PHONE_NUMBER_ID:
+            raise ValueError("META_ACCESS_TOKEN and PHONE_NUMBER_ID must be provided")
+        meta_client = MetaWhatsAppClient()
+        logger.info("✅ Meta WhatsApp client initialized successfully")
+        logger.info(f"   Phone Number ID: {settings.PHONE_NUMBER_ID}")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Meta WhatsApp client: {e}")
+        raise
     
     # Initialize Agent Orchestrator (caches Gemini client)
     try:
@@ -227,7 +203,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Failed to start reminder checker: {e}")
     
     startup_time = time.time() - startup_start
-    logger.info(f"✅ TaskFlow is ready to receive messages! (Startup: {startup_time:.2f}s)")
+    logger.info(f"✅ Evara is ready to receive messages! (Startup: {startup_time:.2f}s)")
     
     # Render requirement: must start in under 60 seconds
     if startup_time > 60:
@@ -238,7 +214,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("👋 Shutting down TaskFlow...")
+    logger.info("👋 Shutting down Evara...")
     shutdown_start = time.time()
     
     # Save memory before exit
@@ -279,13 +255,8 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
     
-    # Close API connections (Twilio client cleanup)
-    try:
-        if twilio_client:
-            # Twilio client doesn't need explicit close, but log it
-            logger.info("✅ Twilio client connections closed")
-    except Exception as e:
-        logger.debug(f"Twilio cleanup: {e}")
+    # Meta client cleanup (no explicit close needed)
+    logger.info("✅ Meta WhatsApp client cleanup complete")
     
     shutdown_time = time.time() - shutdown_start
     logger.info(f"✅ Graceful shutdown complete (Shutdown: {shutdown_time:.2f}s)")
@@ -309,74 +280,27 @@ app.add_middleware(
 )
 
 
-def validate_twilio_request(request: Request, form_data: dict) -> bool:
-    """
-    Validate that the request is actually from Twilio.
-    
-    Args:
-        request: The FastAPI request object
-        form_data: The form data from the request
-        
-    Returns:
-        True if request is valid, False otherwise
-    """
-    if settings.DEBUG and settings.ENVIRONMENT == "development":
-        # Skip validation in development mode
-        logger.warning("⚠️  Skipping Twilio signature validation (development mode)")
-        return True
-    
-    if not request_validator:
-        logger.error("Request validator not initialized")
-        return False
-    
-    # Get the URL and signature
-    url = str(request.url)
-    signature = request.headers.get("X-Twilio-Signature", "")
-    
-    # Validate the request
-    is_valid = request_validator.validate(url, form_data, signature)
-    
-    if not is_valid:
-        logger.warning(f"⚠️  Invalid Twilio signature for request from {request.client.host}")
-    
-    return is_valid
-
-
 async def send_whatsapp_message(to: str, message: str) -> bool:
     """
-    Send a WhatsApp message via Meta or Twilio.
+    Send a WhatsApp message via Meta WhatsApp Business API.
     
     Args:
-        to: Recipient's WhatsApp number (format: whatsapp:+1234567890 or 1234567890)
+        to: Recipient's WhatsApp number (format: +1234567890)
         message: Message content to send
         
     Returns:
         True if message sent successfully, False otherwise
     """
-    global use_meta, meta_client, twilio_client
+    global meta_client
     
     try:
-        if use_meta and meta_client:
-            # Use Meta WhatsApp API
-            return await meta_client.send_message(to, message, message_type="text")
-        elif twilio_client:
-            # Use Twilio (fallback)
-            if not to.startswith("whatsapp:"):
-                to = f"whatsapp:{to}"
-            
-            logger.info(f"📤 Sending message via Twilio to {to}")
-            
-            message_response = twilio_client.messages.create(
-                body=message,
-                from_=settings.TWILIO_WHATSAPP_NUMBER,
-                to=to
-            )
-            
-            logger.info(f"✅ Message sent successfully. SID: {message_response.sid}")
-            return True
-        else:
-            logger.error("❌ No WhatsApp client initialized")
+        if not meta_client:
+            logger.error("❌ Meta WhatsApp client not initialized")
             return False
+        
+        # Use Meta WhatsApp API
+        logger.info(f"📤 Sending message via Meta WhatsApp to {to}")
+        return await meta_client.send_message(to, message, message_type="text")
         
     except Exception as e:
         logger.error(f"❌ Failed to send message to {to}: {e}")
@@ -459,9 +383,8 @@ async def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "timestamp": datetime.now().isoformat(),
-        "whatsapp_provider": "meta" if use_meta else "twilio",
-        "meta_configured": meta_client is not None if use_meta else None,
-        "twilio_configured": twilio_client is not None if not use_meta else None,
+        "whatsapp_provider": "meta",
+        "meta_configured": meta_client is not None,
     }
     
     # Check memory file accessibility
@@ -480,11 +403,10 @@ async def health_check():
         "gemini_configured": bool(settings.GEMINI_API_KEY),
         "serpapi_configured": bool(settings.SERPAPI_KEY),
         "meta_configured": bool(settings.META_ACCESS_TOKEN and settings.PHONE_NUMBER_ID),
-        "twilio_configured": bool(settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN),
     }
     
     # Determine overall status
-    whatsapp_configured = (use_meta and meta_client) or (not use_meta and twilio_client)
+    whatsapp_configured = meta_client is not None
     if not whatsapp_configured:
         health_status["status"] = "degraded"
         health_status["issues"] = ["WhatsApp not configured"]
@@ -500,18 +422,18 @@ async def health_check():
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     """
-    WhatsApp webhook endpoint (supports both Meta and Twilio).
+    WhatsApp webhook endpoint for Meta WhatsApp Business API.
     Receives incoming WhatsApp messages and processes them.
     """
-    global use_meta, meta_client
+    global meta_client
     
     try:
-        if use_meta and meta_client:
-            # Handle Meta WhatsApp webhook
-            return await handle_meta_webhook(request)
-        else:
-            # Handle Twilio WhatsApp webhook (legacy)
-            return await handle_twilio_webhook(request)
+        if not meta_client:
+            logger.error("❌ Meta WhatsApp client not initialized")
+            return PlainTextResponse(content="", status_code=503)
+        
+        # Handle Meta WhatsApp webhook
+        return await handle_meta_webhook(request)
             
     except HTTPException:
         raise
@@ -567,105 +489,28 @@ async def handle_meta_webhook(request: Request) -> PlainTextResponse:
         return PlainTextResponse(content="", status_code=200)
 
 
-async def handle_twilio_webhook(request: Request) -> PlainTextResponse:
-    """Handle Twilio WhatsApp webhook requests (legacy support)."""
-    try:
-        form_data = await request.form()
-        From = form_data.get("From", "")
-        Body = form_data.get("Body", "")
-        MessageSid = form_data.get("MessageSid")
-        NumMedia = form_data.get("NumMedia", "0")
-        
-        # Log incoming message
-        logger.info("="*80)
-        logger.info(f"📨 Incoming Twilio WhatsApp message")
-        logger.info(f"From: {From}")
-        logger.info(f"Message SID: {MessageSid}")
-        logger.info(f"Body: {Body[:100]}...")
-        logger.info(f"Media count: {NumMedia}")
-        
-        # Get all form data for signature validation
-        form_dict = {
-            "From": From,
-            "Body": Body,
-        }
-        if MessageSid:
-            form_dict["MessageSid"] = MessageSid
-        if NumMedia:
-            form_dict["NumMedia"] = NumMedia
-        
-        # Validate request is from Twilio
-        if not validate_twilio_request(request, form_dict):
-            logger.error("❌ Invalid Twilio signature - rejecting request")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid request signature"
-            )
-        
-        # Check if message contains media
-        if NumMedia and int(NumMedia) > 0:
-            response_message = "📎 I received your media! Media handling will be added in future phases."
-            await send_whatsapp_message(From, response_message)
-            return PlainTextResponse(content="", status_code=200)
-        
-        # Process the message and generate response
-        response_message = await process_incoming_message(From, Body)
-        
-        # Send response back to user
-        success = await send_whatsapp_message(From, response_message)
-        
-        if success:
-            logger.info("✅ Message processed and response sent successfully")
-        else:
-            logger.error("❌ Failed to send response message")
-        
-        logger.info("="*80)
-        
-        # Return empty response (Twilio expects 200 OK with empty body)
-        return PlainTextResponse(content="", status_code=200)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error processing Twilio webhook: {e}", exc_info=True)
-        
-        # Try to send error notification to user
-        try:
-            From = form_data.get("From", "")
-            if From:
-                error_message = get_friendly_error_message("general")
-                await send_whatsapp_message(From, error_message)
-        except:
-            pass
-        
-        # Return 200 to Twilio to avoid retries
-        return PlainTextResponse(content="", status_code=200)
-
-
 @app.get("/webhook")
 async def webhook_get(request: Request):
     """
-    Handle GET requests to webhook.
-    - Meta: Webhook verification (returns challenge)
-    - Twilio: Status check
+    Handle GET requests to webhook for Meta webhook verification.
+    Returns challenge during webhook setup.
     """
-    global use_meta, meta_client
+    global meta_client
     
-    if use_meta and meta_client:
-        # Meta webhook verification
-        if meta_client.verify_webhook(request):
-            challenge = meta_client.get_challenge(request)
-            if challenge:
-                logger.info("✅ Meta webhook verified - returning challenge")
-                return PlainTextResponse(content=challenge, status_code=200)
-            else:
-                return PlainTextResponse(content="", status_code=200)
+    if not meta_client:
+        raise HTTPException(status_code=503, detail="Meta WhatsApp client not initialized")
+    
+    # Meta webhook verification
+    if meta_client.verify_webhook(request):
+        challenge = meta_client.get_challenge(request)
+        if challenge:
+            logger.info("✅ Meta webhook verified - returning challenge")
+            return PlainTextResponse(content=challenge, status_code=200)
         else:
-            logger.warning("⚠️  Meta webhook verification failed")
-            raise HTTPException(status_code=403, detail="Verification failed")
+            return PlainTextResponse(content="", status_code=200)
     else:
-        # Twilio status check
-        return {"message": "TaskFlow webhook endpoint is active"}
+        logger.warning("⚠️  Meta webhook verification failed")
+        raise HTTPException(status_code=403, detail="Verification failed")
 
 
 if __name__ == "__main__":

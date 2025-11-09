@@ -1,5 +1,5 @@
 """
-User-facing message utilities for TaskFlow.
+User-facing message utilities for Evara.
 Provides friendly messages for users while logging technical errors.
 """
 
@@ -12,7 +12,7 @@ def get_welcome_message() -> str:
         Welcome message string
     """
     return (
-        "👋 Hey! I'm TaskFlow, your AI assistant.\n\n"
+        "👋 Hey! I'm Evara, your AI assistant.\n\n"
         "I can help you with:\n"
         "✈️ Search flights\n"
         "💰 Track product prices\n"
@@ -30,7 +30,7 @@ def get_help_message() -> str:
         Help message string
     """
     return (
-        "📚 TaskFlow Help\n\n"
+        "📚 Evara Help\n\n"
         "I can help you with:\n\n"
         "✈️ Flight Search:\n"
         "  • 'Find flights from Delhi to Mumbai on Dec 15'\n"

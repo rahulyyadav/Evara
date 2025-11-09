@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: taskflow-agent
+    name: evara-agent
     env: python
     buildCommand: pip install -r requirements.txt && playwright install chromium
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -13,4 +13,3 @@ services:
         value: INFO
     healthCheckPath: /
     plan: free
-
