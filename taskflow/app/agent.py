@@ -177,7 +177,7 @@ Available intents:
 2. "price_track" - User wants to track product prices, check tracked items, or stop tracking (e.g., "track iPhone price", "check tracked items", "stop tracking iPhone")
 3. "reminder" - User wants to set, list, or cancel reminders (e.g., "remind me to call mom", "show my reminders", "cancel reminder 1")
 4. "status_check" - User wants to check status of previous tasks (e.g., "check my flights", "what am I tracking", "show my reminders")
-5. "general" - Casual conversation, greetings, questions (e.g., "hello", "how are you", "what can you do")
+5. "general" - Casual conversation, greetings, general knowledge questions, or any question that doesn't fit the above categories (e.g., "hello", "how are you", "what can you do", "who is the prime minister of switzerland", "what is the capital of France", "explain quantum physics")
 
 {context}
 
@@ -440,7 +440,11 @@ Important:
             Natural language response
         """
         if not self.gemini_model:
-            # Fallback response generation
+            # For general questions, we MUST have Gemini - return error message
+            if intent == self.INTENT_GENERAL:
+                logger.error("Gemini model not available but required for general questions")
+                return "I'm sorry, but I need my AI capabilities to answer general questions. Please ensure GEMINI_API_KEY is configured."
+            # Fallback response generation for other intents
             return self._fallback_response_generation(intent, tool_result)
         
         try:
@@ -457,11 +461,78 @@ Important:
             if tool_result:
                 tool_info = f"\nTool execution result:\n{json.dumps(tool_result, indent=2)}"
             
-            prompt = f"""You are Evara, a helpful WhatsApp AI assistant that helps users with:
+            # For general questions, use a more direct prompt
+            if intent == self.INTENT_GENERAL:
+                # Information about Evara (only use when explicitly asked)
+                evara_info = """
+About Evara - IMPORTANT: Only share this information if the user EXPLICITLY asks about it:
+
+Your Identity:
+- You are Evara, an AI agent created by Rahul Yadav
+- When asked "which model are you using" or "what model are you" or "what are you":
+  → Reply clearly and formally: "I am Evara, an AI agent created by Rahul Yadav."
+
+Creator Information:
+- Created by: Rahul Yadav
+- When asked "who made you" or "who created you" or "who is your creator" or "who made this agent":
+  → Reply clearly: "I was created by Rahul Yadav."
+
+Contact Information:
+- Email: rahulyyadav21@gmail.com
+- When asked for "contact" or "email" or "how to contact" or "your email":
+  → Reply: "rahulyyadav21@gmail.com"
+
+CRITICAL: Do NOT mention any of this information (name, creator, contact) unless the user specifically asks about it. Keep responses focused only on what the user asked.
+"""
+                
+                prompt = f"""You are Evara, a helpful and knowledgeable AI assistant on WhatsApp.
+
+{evara_info}
+
+{context}
+
+User asked: "{message}"
+
+Please provide a helpful, accurate, and concise answer to the user's question. 
+- Answer general knowledge questions directly and accurately
+- Be conversational and friendly
+- Use emojis sparingly (1-2 max)
+- Keep response under 1600 characters
+- Format for WhatsApp (short paragraphs, easy to read)
+- If you don't know something, say so honestly
+- Only mention information about Evara's creator/contact if the user explicitly asks
+
+Respond directly with your answer, no JSON or code blocks. Just the answer text."""
+            else:
+                # Information about Evara (only use when explicitly asked)
+                evara_info = """
+About Evara - IMPORTANT: Only share this information if the user EXPLICITLY asks about it:
+
+Your Identity:
+- You are Evara, an AI agent created by Rahul Yadav
+- When asked "which model are you using" or "what model are you" or "what are you":
+  → Reply clearly and formally: "I am Evara, an AI agent created by Rahul Yadav."
+
+Creator Information:
+- Created by: Rahul Yadav
+- When asked "who made you" or "who created you" or "who is your creator" or "who made this agent":
+  → Reply clearly: "I was created by Rahul Yadav."
+
+Contact Information:
+- Email: rahulyyadav21@gmail.com
+- When asked for "contact" or "email" or "how to contact" or "your email":
+  → Reply: "rahulyyadav21@gmail.com"
+
+CRITICAL: Do NOT mention any of this information (name, creator, contact) unless the user specifically asks about it. Keep responses focused only on what the user asked.
+"""
+                
+                prompt = f"""You are Evara, a helpful WhatsApp AI assistant that helps users with:
 - Flight searches
 - Price tracking
 - Reminders
 - General questions
+
+{evara_info}
 
 {context}
 
@@ -477,6 +548,7 @@ Generate a friendly, concise response (under 1600 characters) that:
 4. If clarification is needed, asks a helpful question
 5. Uses emojis appropriately (but not excessively)
 6. Is formatted for WhatsApp (short paragraphs, bullet points if needed)
+7. Only mention information about Evara's creator/contact if the user explicitly asks
 
 Respond directly with the message text, no JSON or code blocks."""
             
@@ -484,13 +556,36 @@ Respond directly with the message text, no JSON or code blocks."""
             
             # Clean up response
             response = response.strip()
+            
+            # Remove quotes if wrapped
             if response.startswith('"') and response.endswith('"'):
                 response = response[1:-1]
+            
+            # Remove markdown code blocks if present
+            if response.startswith("```"):
+                lines = response.split("\n")
+                response = "\n".join(lines[1:-1]) if len(lines) > 2 else response
+                response = response.strip()
+            
+            # For general questions, ensure we got a real response
+            if intent == self.INTENT_GENERAL and (not response or len(response) < 10):
+                logger.warning(f"Gemini returned very short response for general question: {response}")
+                # Try once more with a simpler prompt
+                simple_prompt = f"User asked: {message}\n\nPlease provide a helpful answer:"
+                try:
+                    response = await self._call_gemini_with_retry(simple_prompt, max_retries=2)
+                    response = response.strip()
+                except Exception as retry_error:
+                    logger.error(f"Retry also failed: {retry_error}")
+                    return "I apologize, but I'm having trouble processing your question right now. Please try again."
             
             return response
             
         except Exception as e:
-            logger.error(f"Error generating response: {e}")
+            logger.error(f"Error generating response: {e}", exc_info=True)
+            # For general questions, don't fall back to default message
+            if intent == self.INTENT_GENERAL:
+                return f"I apologize, but I encountered an error while processing your question. Please try rephrasing it."
             return self._fallback_response_generation(intent, tool_result)
     
     def _fallback_response_generation(

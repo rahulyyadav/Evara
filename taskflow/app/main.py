@@ -328,31 +328,27 @@ async def process_incoming_message(from_number: str, message_body: str) -> str:
             logger.warning(f"Rate limit exceeded for {from_number}")
             return rate_limit_message
     
-    # Check for help command
-    message_lower = message_body.lower().strip()
-    if message_lower in ["help", "hi", "hello", "hey"]:
-        return get_help_message()
-    
     if not agent:
         logger.error("Agent not initialized - cannot process message")
         return get_friendly_error_message("initialization")
     
-    # Check if first-time user and send welcome message
-    user_memory = agent.memory_store.get_user_memory(from_number)
-    conversation_history = user_memory.get("conversation_history", [])
-    
-    # If this is the first conversation, send welcome message first
-    is_first_time = len(conversation_history) == 0
-    
-    # Use agent to process message
-    try:
-        response = await agent.process_message(from_number, message_body)
+    # Check for help/greeting commands (before processing)
+    message_lower = message_body.lower().strip()
+    if message_lower in ["help", "hi", "hello", "hey"]:
+        # Check if first-time user
+        user_memory = agent.memory_store.get_user_memory(from_number)
+        conversation_history = user_memory.get("conversation_history", [])
+        is_first_time = len(conversation_history) == 0
         
-        # If first-time user, prepend welcome message
         if is_first_time:
             welcome_msg = get_welcome_message()
-            return f"{welcome_msg}\n\n{response}"
-        
+            return f"{welcome_msg}\n\n{get_help_message()}"
+        else:
+            return get_help_message()
+    
+    # Use agent to process message (for all other messages including general questions)
+    try:
+        response = await agent.process_message(from_number, message_body)
         return response
     except Exception as e:
         logger.error(f"Error in agent processing: {e}", exc_info=True)
