@@ -10,7 +10,7 @@ from datetime import datetime
 import pytz
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings, get_log_file_path, get_memory_file_path
@@ -428,21 +428,29 @@ async def whatsapp_webhook(request: Request):
     global meta_client
     
     try:
-        if not meta_client:
-            logger.error("❌ Meta WhatsApp client not initialized")
-            return PlainTextResponse(content="", status_code=503)
-        
-        # Handle Meta WhatsApp webhook
-        return await handle_meta_webhook(request)
+        # If meta_client is available, use existing processing logic
+        if meta_client:
+            # Let handle_meta_webhook parse and process (keeps existing logic intact)
+            return await handle_meta_webhook(request)
+        else:
+            # If client not initialized, just log and acknowledge
+            body = await request.json()
+            logger.info("="*80)
+            logger.info(f"📨 Incoming Meta WhatsApp webhook payload")
+            logger.info(f"Raw JSON: {body}")
+            print(f"Incoming webhook payload: {body}")  # Also print for debugging
+            logger.warning("⚠️  Meta WhatsApp client not initialized - acknowledging receipt only")
+            return JSONResponse(content={"status": "received"}, status_code=200)
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ Error processing webhook: {e}", exc_info=True)
-        return PlainTextResponse(content="", status_code=200)
+        # Still return success to Meta to avoid retries
+        return JSONResponse(content={"status": "received"}, status_code=200)
 
 
-async def handle_meta_webhook(request: Request) -> PlainTextResponse:
+async def handle_meta_webhook(request: Request):
     """Handle Meta WhatsApp webhook requests."""
     global meta_client
     
@@ -451,6 +459,8 @@ async def handle_meta_webhook(request: Request) -> PlainTextResponse:
         body = await request.json()
         logger.info("="*80)
         logger.info(f"📨 Incoming Meta WhatsApp message")
+        logger.info(f"Raw JSON payload: {body}")  # Log full payload
+        print(f"Incoming webhook payload: {body}")  # Also print for debugging
         logger.debug(f"Raw payload: {body}")
         
         # Parse the message
@@ -458,7 +468,7 @@ async def handle_meta_webhook(request: Request) -> PlainTextResponse:
         
         if not parsed_message:
             logger.warning("⚠️  Could not parse Meta webhook message")
-            return PlainTextResponse(content="", status_code=200)
+            return JSONResponse(content={"status": "received"}, status_code=200)
         
         from_number = parsed_message["from"]
         message_body = parsed_message["body"]
@@ -481,12 +491,12 @@ async def handle_meta_webhook(request: Request) -> PlainTextResponse:
         
         logger.info("="*80)
         
-        # Meta expects 200 OK
-        return PlainTextResponse(content="", status_code=200)
+        # Return JSON response as requested
+        return JSONResponse(content={"status": "received"}, status_code=200)
         
     except Exception as e:
         logger.error(f"❌ Error processing Meta webhook: {e}", exc_info=True)
-        return PlainTextResponse(content="", status_code=200)
+        return JSONResponse(content={"status": "received"}, status_code=200)
 
 
 @app.get("/webhook")
@@ -495,22 +505,39 @@ async def webhook_get(request: Request):
     Handle GET requests to webhook for Meta webhook verification.
     Returns challenge during webhook setup.
     """
-    global meta_client
+    import os
     
-    if not meta_client:
-        raise HTTPException(status_code=503, detail="Meta WhatsApp client not initialized")
+    # Read query parameters
+    hub_mode = request.query_params.get("hub.mode")
+    hub_verify_token = request.query_params.get("hub.verify_token")
+    hub_challenge = request.query_params.get("hub.challenge")
     
-    # Meta webhook verification
-    if meta_client.verify_webhook(request):
-        challenge = meta_client.get_challenge(request)
-        if challenge:
-            logger.info("✅ Meta webhook verified - returning challenge")
-            return PlainTextResponse(content=challenge, status_code=200)
-        else:
-            return PlainTextResponse(content="", status_code=200)
+    # Get verify token from environment (fallback to default)
+    verify_token = os.getenv("VERIFY_TOKEN", "evara123Aachal")
+    
+    # Also check META_VERIFY_TOKEN as fallback
+    if verify_token == "evara123Aachal":
+        verify_token = os.getenv("META_VERIFY_TOKEN", "evara123Aachal")
+    
+    # Verify token matches
+    if hub_mode == "subscribe" and hub_verify_token == verify_token:
+        logger.info("✅ Meta webhook verified - returning challenge")
+        # Return challenge as plain integer (not string or JSON)
+        try:
+            challenge_int = int(hub_challenge) if hub_challenge else None
+            if challenge_int is not None:
+                return PlainTextResponse(content=str(challenge_int), status_code=200)
+            else:
+                return PlainTextResponse(content="", status_code=200)
+        except (ValueError, TypeError):
+            # If challenge is not a number, return it as-is
+            return PlainTextResponse(content=hub_challenge or "", status_code=200)
     else:
-        logger.warning("⚠️  Meta webhook verification failed")
-        raise HTTPException(status_code=403, detail="Verification failed")
+        logger.warning(f"⚠️  Meta webhook verification failed: mode={hub_mode}, token_match={hub_verify_token == verify_token}")
+        return JSONResponse(
+            content={"error": "Verification failed"},
+            status_code=403
+        )
 
 
 if __name__ == "__main__":
