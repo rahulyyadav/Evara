@@ -100,7 +100,7 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
             pending_reminders = memory_store.get_all_pending_reminders()
             
             now_ist = datetime.now(IST)
-            logger.debug(f"⏰ Reminder check at {now_ist.strftime('%I:%M:%S %p IST')} - Found {len(pending_reminders)} pending reminder(s)")
+            logger.info(f"⏰ Reminder check at {now_ist.strftime('%I:%M:%S %p IST')} - Found {len(pending_reminders)} pending reminder(s)")
             
             if not pending_reminders:
                 continue
@@ -133,7 +133,7 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
                     # This gives us some buffer but ensures we send it right after the scheduled time
                     time_diff = (now_ist - reminder_dt).total_seconds()
                     
-                    logger.debug(f"📋 Reminder {reminder_id[:8]}... for {user_number}: "
+                    logger.info(f"📋 Reminder {reminder_id[:8]}... for {user_number}: "
                                f"Due at {reminder_dt.strftime('%I:%M:%S %p')}, "
                                f"Time diff: {time_diff:.1f}s, "
                                f"Status: {'DUE!' if 0 <= time_diff < 20 else 'waiting'}")
