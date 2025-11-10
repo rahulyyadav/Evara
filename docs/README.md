@@ -1,217 +1,442 @@
-# TaskFlow Documentation
+# 🤖 Evara - WhatsApp AI Task Automation Agent
 
-Welcome to the TaskFlow documentation! This folder contains comprehensive guides for understanding, setting up, and developing TaskFlow.
+Evara is a production-grade WhatsApp AI agent that helps you automate tasks through natural conversations. Built with FastAPI, Meta WhatsApp Business API, and Google Gemini AI.
 
-## 📚 Documentation Index
+## 📋 Current Status: Phase 7 Complete ✅
 
-### Getting Started
+**All Phases Implemented:**
+- ✅ Phase 1: FastAPI + Meta WhatsApp Business API webhook
+- ✅ Phase 2: AI agent orchestration with Google Gemini
+- ✅ Phase 3: Flight search with SerpAPI
+- ✅ Phase 4: Price tracking with Playwright
+- ✅ Phase 5: Reminder system
+- ✅ Phase 6: Persistent memory with thread-safe operations
+- ✅ Phase 7: Configuration management
 
-1. **[QUICKSTART.md](./QUICKSTART.md)** ⚡
-   - 5-minute setup guide
-   - Perfect for first-time users
-   - Step-by-step instructions
-   - **Start here!**
+## 🚀 Tech Stack
 
-2. **[setup-guide.md](./setup-guide.md)** 🛠️
-   - Detailed setup instructions
-   - Manual installation steps
-   - Deployment guides
-   - Troubleshooting section
+- **Backend:** Python 3.11+ with FastAPI
+- **WhatsApp:** Meta WhatsApp Business API
+- **AI:** Google Gemini 1.5 Flash
+- **Tools:** SerpAPI (flight search), Playwright (web scraping)
+- **Storage:** JSON file storage with thread-safe operations and backups
+- **Configuration:** Pydantic Settings with environment variable validation
+- **Deployment:** Production-ready with Gunicorn
 
-### Architecture & Design
+## 📦 Installation
 
-3. **[architecture.md](./architecture.md)** 🏗️
-   - System architecture overview
-   - Component design
-   - Data flow diagrams
-   - Scalability considerations
-   - Technology stack details
+### Prerequisites
 
-### Project Progress
+- Python 3.11 or higher
+- Meta WhatsApp Business API credentials
+- Google Gemini API key (for AI features)
+- SerpAPI key (for flight search, optional)
+- Playwright with Chromium (for price tracking, optional)
 
-4. **[phase1-completion.md](./phase1-completion.md)** ✅
-   - Phase 1 completion summary
-   - Features implemented
-   - Files created
-   - Verification checklist
-   - What's next for Phase 2
+### Setup Steps
 
-## 🗺️ Documentation Structure
-
-```
-docs/
-├── README.md                    # This file - navigation guide
-├── QUICKSTART.md               # Quick 5-minute setup
-├── setup-guide.md              # Detailed setup & deployment
-├── architecture.md             # System architecture
-└── phase1-completion.md        # Phase 1 summary
+1. **Clone and navigate to the project:**
+```bash
+cd taskflow
 ```
 
-## 🎯 Which Guide Should I Read?
+2. **Create a virtual environment:**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
-### I'm new and want to get started quickly
-→ Read **[QUICKSTART.md](./QUICKSTART.md)**
+3. **Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
 
-### I want detailed setup instructions
-→ Read **[setup-guide.md](./setup-guide.md)**
+4. **Install Playwright browsers (for price tracking):**
+```bash
+playwright install chromium
+```
+> **Note:** Chromium is only needed for price tracking. Other features work without it.
 
-### I want to understand the architecture
-→ Read **[architecture.md](./architecture.md)**
+5. **Configure environment variables:**
+```bash
+cp .env.example .env
+```
 
-### I want to see what was built in Phase 1
-→ Read **[phase1-completion.md](./phase1-completion.md)**
+Edit `.env` with your actual credentials:
 
-### I'm deploying to production
-→ Read **[setup-guide.md](./setup-guide.md)** (Deployment section)
+**Required:**
+- `META_ACCESS_TOKEN`: From [Meta Developer Console](https://developers.facebook.com/)
+- `PHONE_NUMBER_ID`: Your WhatsApp Business phone number ID
+- `META_VERIFY_TOKEN`: Webhook verification token (use a strong random string)
 
-### I'm having issues
-→ Check **[setup-guide.md](./setup-guide.md)** (Troubleshooting section)
+**Optional (for full functionality):**
+- `GEMINI_API_KEY`: From [Google AI Studio](https://makersuite.google.com/app/apikey)
+- `SERPAPI_KEY`: From [SerpAPI](https://serpapi.com/) (for flight search)
+- `ENVIRONMENT`: `dev` or `prod` (default: `dev`)
 
-## 📖 Reading Order for Newcomers
+6. **Create necessary directories:**
+```bash
+mkdir -p data logs
+```
 
-1. **Phase 1 Completion** - Understand what exists
-2. **Quickstart** - Get it running
-3. **Architecture** - Learn how it works
-4. **Setup Guide** - Master advanced topics
+## 🏃‍♂️ Running the Application
 
-## 🔗 Quick Links
+### Development Mode
 
-### Project Files
-- [Main README](../taskflow/README.md) - Project overview
-- [Requirements](../taskflow/requirements.txt) - Dependencies
-- [Setup Script](../taskflow/setup.sh) - Automated setup
+```bash
+# From the taskflow directory
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-### Phase Documents
-- [Phase 1](../Phases/Phase1.md) - Current phase
-- [Phase 2-9](../Phases/) - Future phases
+Or simply:
+```bash
+python -m app.main
+```
 
-### External Resources
-- [Twilio Console](https://console.twilio.com/)
-- [WhatsApp Sandbox](https://console.twilio.com/us1/develop/sms/settings/whatsapp-sandbox)
-- [Gemini API](https://makersuite.google.com/app/apikey)
-- [FastAPI Docs](https://fastapi.tiangolo.com/)
+The application will start on `http://localhost:8000`
 
-## 🎓 Learning Path
+### Production Mode
 
-### For Developers
+```bash
+gunicorn app.main:app \
+  --workers 4 \
+  --worker-class uvicorn.workers.UvicornWorker \
+  --bind 0.0.0.0:8000 \
+  --log-level info
+```
 
-1. **Understand the System**
-   - Read architecture.md
-   - Review main.py
-   - Check config.py
+## 🌐 Meta WhatsApp Webhook Setup
 
-2. **Set Up Development Environment**
-   - Follow setup-guide.md
-   - Run locally
-   - Test with curl
+1. **Start your application** (locally or deployed)
 
-3. **Connect to WhatsApp**
-   - Configure Twilio
-   - Test with real messages
-   - Monitor logs
+2. **Expose your local server** (for local development):
+```bash
+# Using ngrok
+ngrok http 8000
+```
 
-4. **Prepare for Phase 2**
-   - Review Phase 2 requirements
-   - Get Gemini API key
-   - Understand agent patterns
+3. **Configure Meta Webhook:**
+   - Go to [Meta Developer Console](https://developers.facebook.com/apps)
+   - Select your app → WhatsApp → Configuration
+   - Set **Webhook URL**: `https://your-url.com/webhook`
+   - Set **Verify Token**: Same as your `META_VERIFY_TOKEN` env variable
+   - Subscribe to `messages` field
+   - Click "Verify and Save"
 
-### For Operators/DevOps
+4. **Test the bot:**
+   - Send any message to your WhatsApp Business number
+   - Try: "Find flights from Delhi to Mumbai"
 
-1. **Deploy the Application**
-   - Follow deployment section in setup-guide.md
-   - Configure environment variables
-   - Set up monitoring
+## 📡 API Endpoints
 
-2. **Monitor & Maintain**
-   - Check logs regularly
-   - Monitor Twilio debugger
-   - Set up alerts
+### `GET /`
+Health check endpoint
+```json
+{
+  "app": "Evara",
+  "version": "1.0.0",
+  "status": "healthy",
+  "environment": "dev"
+}
+```
 
-3. **Scale as Needed**
-   - Add more workers
-   - Configure load balancer
-   - Plan database migration
+### `GET /health`
+Detailed health status
+```json
+{
+  "status": "healthy",
+  "app": "Evara",
+  "version": "1.0.0",
+  "environment": "dev",
+  "meta_configured": true
+}
+```
 
-## 📝 Document Summaries
+### `POST /webhook`
+Meta WhatsApp Business API webhook endpoint (receives messages from users)
 
-### QUICKSTART.md
-**Length:** ~5 minutes  
-**Audience:** New users  
-**Content:** Fastest way to get TaskFlow running locally
+### `GET /webhook`
+Webhook validation endpoint
 
-### setup-guide.md
-**Length:** ~15 minutes  
-**Audience:** Developers, DevOps  
-**Content:** Complete setup, deployment, and troubleshooting guide
+### `GET /docs`
+Interactive API documentation (Swagger UI)
 
-### architecture.md
-**Length:** ~20 minutes  
-**Audience:** Developers, architects  
-**Content:** System design, patterns, and technical decisions
+## 🎯 Features
 
-### phase1-completion.md
-**Length:** ~10 minutes  
-**Audience:** All  
-**Content:** What was built, how it works, what's next
+### 1. Flight Search
+Search for flights using natural language:
+- "Find flights from Delhi to Mumbai on December 15"
+- "Cheap flights to Goa tomorrow"
+- "Flights from Bangalore to Chennai next Friday"
 
-## 🆕 What's New
+### 2. Price Tracking
+Track product prices on Amazon:
+- "Track iPhone 15 price on Amazon"
+- "Track this product: [URL]"
+- "Check my tracked items"
+- "Stop tracking [product name]"
 
-### Phase 1 Complete (Current)
-- ✅ FastAPI application
-- ✅ Twilio WhatsApp integration
-- ✅ Production-ready architecture
-- ✅ Comprehensive documentation
+### 3. Reminders
+Set and manage reminders:
+- "Remind me to call doctor tomorrow at 3pm"
+- "Set reminder for meeting on Dec 20 at 2pm"
+- "Show my reminders"
+- "Cancel reminder [ID]"
 
-### Coming in Phase 2
-- 🚀 Google Gemini AI integration
-- 🤖 Intelligent message processing
-- 💬 Context-aware responses
-- 🧠 Agent orchestration
+### 4. General Chat
+Have natural conversations with the AI agent
 
-## 🤝 Contributing to Documentation
+## 📝 Logging
 
-When adding new documentation:
+Logs are written to both:
+- **Console:** Simple format for development
+- **File:** `logs/evara.log` with rotation (10MB max, 5 backups)
 
-1. **Keep it organized** - Use this README as the index
-2. **Link everything** - Add cross-references
-3. **Use examples** - Show, don't just tell
-4. **Keep it updated** - Update when code changes
-5. **Think about the reader** - Who is the audience?
+Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
-### Documentation Standards
+Configure via `LOG_LEVEL` in `.env`
 
-- Use clear headings (##, ###)
-- Include code examples
-- Add diagrams where helpful
-- Use emojis sparingly for navigation
-- Link to external resources
-- Keep it concise but complete
+## 🔒 Security Features
 
-## 📞 Support
+- ✅ Meta webhook verification
+- ✅ Environment variable configuration (no hardcoded credentials)
+- ✅ Secure token handling
+- ✅ Input validation with Pydantic
+- ✅ Thread-safe file operations
+- ✅ Atomic writes for data integrity
 
-If documentation doesn't answer your question:
+## 📂 Project Structure
 
-1. Check the troubleshooting section
-2. Review the logs
-3. Check Twilio debugger
-4. Review the code comments
+```
+taskflow/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI app & Meta WhatsApp webhook
+│   ├── config.py            # Configuration management (Pydantic)
+│   ├── agent.py             # AI agent orchestration
+│   ├── tools/               # Automation tools
+│   │   ├── __init__.py
+│   │   ├── flight_search.py # Flight search with SerpAPI
+│   │   ├── price_tracker.py # Price tracking with Playwright
+│   │   └── reminder.py      # Reminder management
+│   ├── memory/              # Memory management
+│   │   ├── __init__.py
+│   │   └── store.py         # Persistent memory with backups
+│   └── utils/
+│       ├── __init__.py
+│       └── logger.py        # Logging setup
+├── data/                    # User memory storage
+│   └── backups/             # Daily backups
+├── logs/                    # Application logs
+├── requirements.txt
+├── .env.example            # Environment variable template
+├── .env                    # Your actual config (gitignored)
+├── .gitignore
+├── README.md
+└── TESTING_GUIDE.md        # Testing instructions
+```
 
-## 🎯 Future Documentation
+## 🧪 Testing
 
-Planned for future phases:
+### Local Testing
 
-- **API Reference** - Complete API documentation
-- **Testing Guide** - How to write tests
-- **Contributing Guide** - How to contribute
-- **Performance Guide** - Optimization tips
-- **Security Guide** - Security best practices
-- **Phase 2-9 Completions** - Progress summaries
+Test the webhook locally:
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -d "From=whatsapp:+1234567890" \
+  -d "Body=Hello TaskFlow" \
+  -d "MessageSid=test123"
+```
+
+### Automated Testing
+
+Run the test script:
+```bash
+python test_features.py
+```
+
+This will test:
+- Health check
+- Flight search
+- Price tracking
+- Reminders
+- General chat
+
+### Testing Guide
+
+See [TESTING_GUIDE.md](TESTING_GUIDE.md) for detailed testing instructions.
+
+## 🚢 Deployment (Render/Heroku/VPS)
+
+### Render Deployment
+
+1. **Push to GitHub**
+
+2. **Connect to Render:**
+   - New Web Service
+   - Connect repository
+   - Build Command: `pip install -r requirements.txt && playwright install chromium`
+   - Start Command: `gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT`
+
+3. **Add environment variables** in Render dashboard:
+   - `META_ACCESS_TOKEN`
+   - `PHONE_NUMBER_ID`
+   - `META_VERIFY_TOKEN`
+   - `GEMINI_API_KEY`
+   - `SERPAPI_KEY` (optional)
+   - `ENVIRONMENT=prod`
+
+4. **Update Meta webhook** with Render URL
+
+### Environment Variables for Production
+
+Make sure to set all required variables in your deployment platform:
+- Required: `META_ACCESS_TOKEN`, `PHONE_NUMBER_ID`, `META_VERIFY_TOKEN`
+- Recommended: `GEMINI_API_KEY`, `SERPAPI_KEY`
+- Optional: `ENVIRONMENT=prod`, `LOG_LEVEL=INFO`
+
+## 🛠️ Development
+
+### Code Style
+
+```bash
+# Format code
+black app/
+
+# Lint
+flake8 app/
+
+# Type checking
+mypy app/
+```
+
+### Configuration Management
+
+All configuration is managed through environment variables using Pydantic Settings:
+
+- **Required variables** are validated at startup
+- **Optional variables** have sensible defaults
+- **Type validation** ensures correct data types
+- **Automatic .env loading** for local development
+
+See `.env.example` for all available variables.
+
+## 🏗️ Architecture
+
+### Agent Orchestration Flow
+
+1. **Message Reception**: Meta WhatsApp webhook receives WhatsApp message
+2. **Intent Classification**: Gemini AI classifies user intent
+3. **Tool Selection**: Agent selects appropriate tool based on intent
+4. **Tool Execution**: Tool performs the requested action
+5. **Response Generation**: Gemini AI generates natural language response
+6. **Memory Storage**: Conversation saved to persistent memory
+7. **Message Sending**: Response sent via Meta WhatsApp Business API
+
+### Memory System
+
+- **Thread-safe operations** with file locking
+- **Atomic writes** prevent data corruption
+- **Daily backups** with 7-day retention
+- **Automatic migration** from old formats
+- **Fast in-memory lookups** with JSON storage
+
+### Tool System
+
+- **Modular design**: Each tool is independent
+- **Graceful degradation**: Works without optional dependencies
+- **Error handling**: Robust retry logic and fallbacks
+- **Caching**: Reduces API calls and improves performance
+
+## 🔮 Future Improvements
+
+- [ ] Database migration (Supabase/PostgreSQL)
+- [ ] Multi-language support
+- [ ] Voice message handling
+- [ ] Image processing
+- [ ] Advanced analytics
+- [ ] User authentication
+- [ ] Admin dashboard
+- [ ] Rate limiting
+- [ ] WebSocket support for real-time updates
+
+## 📖 Documentation
+
+- [docs/TESTING_GUIDE.md](../docs/TESTING_GUIDE.md) - How to test features
+- [docs/CHROMIUM_NEEDED.md](../docs/CHROMIUM_NEEDED.md) - Playwright/Chromium requirements
+- [docs/DEPLOYMENT_GUIDE.md](../docs/DEPLOYMENT_GUIDE.md) - Deployment instructions
+- [docs/META_SETUP_GUIDE.md](../docs/META_SETUP_GUIDE.md) - Meta WhatsApp setup
+- API Documentation: `http://localhost:8000/docs` (when running)
+
+## 🤝 Contributing
+
+This is a phased development project. Each phase builds upon the previous one:
+- **Phase 1:** ✅ FastAPI + Meta WhatsApp Business API webhook
+- **Phase 2:** ✅ AI integration with Gemini
+- **Phase 3:** ✅ Flight search
+- **Phase 4:** ✅ Price tracking
+- **Phase 5:** ✅ Reminder system
+- **Phase 6:** ✅ Persistent memory
+- **Phase 7:** ✅ Configuration management
 
 ## 📄 License
 
-All documentation is part of the TaskFlow project and follows the same license.
+MIT License
+
+## 🆘 Troubleshooting
+
+### Issue: Configuration Error on Startup
+**Solution:** Ensure all required environment variables are set in `.env`:
+- `META_ACCESS_TOKEN`
+- `PHONE_NUMBER_ID`
+- `META_VERIFY_TOKEN`
+
+### Issue: Meta webhook verification fails
+**Solution:** Ensure your verify token in Meta console exactly matches `META_VERIFY_TOKEN` in your environment variables
+
+### Issue: Messages not being received
+**Solution:** 
+- Check Meta webhook is configured correctly
+- Verify webhook URL is correct and accessible
+- Ensure webhook is subscribed to `messages` field
+- Check logs for errors: `tail -f logs/evara.log`
+
+### Issue: Cannot send messages
+**Solution:**
+- Verify `META_ACCESS_TOKEN` is valid and not expired
+- Check `PHONE_NUMBER_ID` is correct
+- Ensure your phone number is added as a test number in Meta console
+
+### Issue: Gemini API errors
+**Solution:**
+- Verify `GEMINI_API_KEY` is set correctly
+- Check API quota and limits
+- Agent will use fallback responses if Gemini is unavailable
+
+### Issue: Playwright/Chromium errors
+**Solution:**
+- Run `playwright install chromium`
+- Chromium is only needed for price tracking
+- Other features work without it
+
+### Issue: Memory file corruption
+**Solution:**
+- Check `data/backups/` for daily backups
+- System automatically restores from backup if corruption detected
+- Manual restore: copy backup file to `data/user_memory.json`
+
+## 📞 Support
+
+For issues and questions:
+- Check the logs: `logs/evara.log`
+- Review Meta webhook logs: https://developers.facebook.com/apps → Your App → WhatsApp → Webhooks
+- Verify environment variables are set correctly
+- Check API keys are valid and have quota
 
 ---
 
-**Happy learning! Build something amazing! 🚀**
+**Built with ❤️ for production use**
 
+**Version:** 1.0.0  
+**Status:** Production Ready ✅
