@@ -862,7 +862,7 @@ Generate a friendly, concise response (under 1600 characters) that:
 10. For time/date questions: ALWAYS use the current time information provided above
 11. References previous conversations naturally when relevant
 
-Respond directly with the message text, no JSON or code blocks.
+Respond directly with the message text, no JSON or code blocks."""
             
             response = await self._call_gemini_with_retry(prompt, max_retries=3)
             
