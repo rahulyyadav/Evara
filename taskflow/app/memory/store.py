@@ -720,14 +720,23 @@ class MemoryStore:
         all_reminders = []
         users = self._memory.get("users", {})
         
+        logger.debug(f"🔍 Checking {len(users)} user(s) for pending reminders")
+        
         for user_number, user_data in users.items():
             reminders = user_data.get("reminders", [])
+            logger.debug(f"🔍 User {user_number}: {len(reminders)} total reminder(s)")
+            
             for reminder in reminders:
-                if reminder.get("status") == "pending":
+                status = reminder.get("status")
+                logger.debug(f"🔍 Reminder {reminder.get('id', 'unknown')[:8]}... status: {status}")
+                
+                if status == "pending":
                     reminder_with_user = reminder.copy()
                     reminder_with_user["user_number"] = user_number
                     all_reminders.append(reminder_with_user)
+                    logger.debug(f"✅ Added pending reminder: {reminder.get('task', 'unknown')}")
         
+        logger.debug(f"🔍 Total pending reminders found: {len(all_reminders)}")
         return all_reminders
     
     def update_reminder(self, user_number: str, reminder_id: str, updates: Dict[str, Any]) -> bool:

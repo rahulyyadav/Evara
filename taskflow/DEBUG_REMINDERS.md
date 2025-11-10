@@ -5,7 +5,7 @@
 ✅ **Memory**: Working perfectly  
 ✅ **Reminder Storage**: Reminders are being saved  
 ✅ **Reminder Retrieval**: Agent can see reminders  
-❌ **Reminder Firing**: Reminders are NOT being sent at due time  
+❌ **Reminder Firing**: Reminders are NOT being sent at due time
 
 ## Test Case from WhatsApp
 
@@ -17,9 +17,11 @@
 ## Possible Causes
 
 ### 1. Background Task Not Started
+
 **Problem**: Reminder checker loop might not be running
 
 **Check Render Logs for:**
+
 ```bash
 ✅ Reminder checker started
 🔄 Reminder checker loop started (checking every 15 seconds)
@@ -30,9 +32,11 @@
 ---
 
 ### 2. No Pending Reminders Found
+
 **Problem**: `get_all_pending_reminders()` returns empty
 
 **Check Render Logs for:**
+
 ```bash
 ⏰ Reminder check at 12:04:15 PM IST - Found 0 pending reminder(s)
 ```
@@ -42,12 +46,14 @@
 ---
 
 ### 3. Timezone Issue
+
 **Problem**: Reminder time doesn't match current time
 
 **Check `/debug/reminders` for:**
+
 ```json
 {
-  "time_diff_seconds": -180  // Negative = future, Positive = past
+  "time_diff_seconds": -180 // Negative = future, Positive = past
 }
 ```
 
@@ -56,9 +62,11 @@
 ---
 
 ### 4. Reminder Sends But Fails
+
 **Problem**: WhatsApp API failing
 
 **Check Render Logs for:**
+
 ```bash
 🔔 FIRING REMINDER abc123...
 📤 Sending reminder to WhatsApp number: +919876543210
@@ -88,6 +96,7 @@
 Visit: `https://your-app.onrender.com/debug/reminders`
 
 **Expected response:**
+
 ```json
 {
   "current_time_ist": "2025-11-10 12:10:00 PM IST",
@@ -106,6 +115,7 @@ Visit: `https://your-app.onrender.com/debug/reminders`
 ```
 
 **What to look for:**
+
 - ✅ `pending_reminders_count > 0` → Reminders exist
 - ✅ `user` field has phone number → User number is attached
 - ✅ `time_diff_seconds > 0` → Reminder is past due
@@ -128,10 +138,13 @@ Visit: `https://your-app.onrender.com/debug/reminders`
 ### Issue 2: Background task not started
 
 **Symptoms in logs**:
+
 ```
 ✅ Evara is ready to receive messages
 ```
+
 But NO:
+
 ```
 ✅ Reminder checker started
 ```
@@ -145,10 +158,13 @@ But NO:
 ### Issue 3: Logs say "DUE!" but nothing happens
 
 **Symptoms**:
+
 ```
 📋 Reminder abc123... Status: DUE!
 ```
+
 But NO:
+
 ```
 🔔 FIRING REMINDER
 ```
@@ -162,6 +178,7 @@ But NO:
 ### Issue 4: Meta WhatsApp API failing
 
 **Symptoms**:
+
 ```
 🔔 FIRING REMINDER
 📤 Sending reminder
@@ -169,6 +186,7 @@ But NO:
 ```
 
 **Causes**:
+
 1. Meta Access Token expired
 2. Phone number not verified
 3. Rate limit exceeded
@@ -182,14 +200,17 @@ But NO:
 Please provide:
 
 1. **Output of `/debug/reminders`**
+
    ```bash
    curl https://your-app.onrender.com/debug/reminders
    ```
 
 2. **Last 100 lines of Render logs**
+
    - Filter by searching: `reminder` or `🔔` or `⏰`
 
 3. **Environment variables** (redacted):
+
    - Is `META_ACCESS_TOKEN` set?
    - Is `PHONE_NUMBER_ID` set?
 
@@ -244,6 +265,7 @@ curl http://localhost:8000/debug/reminders
 ### Fix 1: Enable DEBUG logging
 
 In `.env`:
+
 ```bash
 LOG_LEVEL=DEBUG
 ```
@@ -257,6 +279,7 @@ Redeploy and check logs for detailed output.
 If reminders are being missed, change check interval:
 
 In `main.py` line 97:
+
 ```python
 await asyncio.sleep(15)  # Try 5 seconds instead
 ```
@@ -266,6 +289,7 @@ await asyncio.sleep(15)  # Try 5 seconds instead
 ### Fix 3: Widen the trigger window
 
 In `main.py` line 141:
+
 ```python
 if 0 <= time_diff < 20:  # Try 60 seconds instead
 ```
@@ -279,4 +303,3 @@ if 0 <= time_diff < 20:  # Try 60 seconds instead
 3. **Share findings** - I'll help debug further based on what you see
 
 The code looks correct, so it's likely an environment or timing issue on Render.
-
