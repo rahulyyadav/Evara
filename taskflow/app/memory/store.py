@@ -649,6 +649,66 @@ class MemoryStore:
         
         return reminders
     
+    def cleanup_old_conversations(self, hours: int = 24) -> Dict[str, Any]:
+        """
+        Clean up conversations older than specified hours for all users.
+        Keeps reminders, tracked products, and preferences intact.
+        
+        Args:
+            hours: Age threshold in hours (default: 24)
+            
+        Returns:
+            Dictionary with cleanup statistics
+        """
+        self._ensure_users_structure()
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        total_deleted = 0
+        users_cleaned = 0
+        
+        users = self._memory.get("users", {})
+        
+        for user_number, user_data in users.items():
+            conversation_history = user_data.get("conversation_history", [])
+            
+            if not conversation_history:
+                continue
+            
+            # Filter conversations newer than cutoff
+            original_count = len(conversation_history)
+            new_history = []
+            
+            for conv in conversation_history:
+                timestamp_str = conv.get("timestamp")
+                if timestamp_str:
+                    try:
+                        conv_time = datetime.fromisoformat(timestamp_str)
+                        if conv_time > cutoff_time:
+                            new_history.append(conv)
+                    except (ValueError, TypeError):
+                        # Keep conversations with invalid timestamps
+                        new_history.append(conv)
+                else:
+                    # Keep conversations without timestamps
+                    new_history.append(conv)
+            
+            deleted_count = original_count - len(new_history)
+            if deleted_count > 0:
+                user_data["conversation_history"] = new_history
+                total_deleted += deleted_count
+                users_cleaned += 1
+        
+        # Save changes
+        if total_deleted > 0:
+            self._save_memory()
+            logger.info(f"🧹 Cleaned up {total_deleted} old conversations from {users_cleaned} user(s)")
+        
+        return {
+            "deleted_conversations": total_deleted,
+            "users_cleaned": users_cleaned,
+            "cutoff_time": cutoff_time.isoformat()
+        }
+    
     def get_all_pending_reminders(self) -> List[Dict[str, Any]]:
         """
         Get all pending reminders across all users.

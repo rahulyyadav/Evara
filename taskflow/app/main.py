@@ -35,11 +35,51 @@ agent: Optional[AgentOrchestrator] = None
 # Reminder checker task
 _reminder_checker_task: Optional[asyncio.Task] = None
 
+# Memory cleanup task
+_memory_cleanup_task: Optional[asyncio.Task] = None
+
 # Rate limiter
 rate_limiter: Optional[RateLimiter] = None
 
 # IST timezone
 IST = pytz.timezone('Asia/Kolkata')
+
+
+async def cleanup_old_memory_loop(memory_store: MemoryStore):
+    """
+    Background task that cleans up conversations older than 24 hours.
+    Runs once per day (every 24 hours).
+    Keeps reminders, tracked products, and preferences intact.
+    
+    Args:
+        memory_store: MemoryStore instance
+    """
+    logger.info("🧹 Memory cleanup loop started (cleaning every 24 hours)")
+    
+    while True:
+        try:
+            # Wait 24 hours before first cleanup (let users accumulate some data)
+            await asyncio.sleep(24 * 60 * 60)  # 24 hours in seconds
+            
+            logger.info("🧹 Starting scheduled memory cleanup...")
+            result = memory_store.cleanup_old_conversations(hours=24)
+            
+            if result["deleted_conversations"] > 0:
+                logger.info(
+                    f"✅ Cleanup complete: Deleted {result['deleted_conversations']} conversations "
+                    f"from {result['users_cleaned']} user(s). "
+                    f"Cutoff: {result['cutoff_time']}"
+                )
+            else:
+                logger.info("✅ Cleanup complete: No old conversations to delete")
+                    
+        except asyncio.CancelledError:
+            logger.info("🧹 Memory cleanup loop cancelled")
+            break
+        except Exception as e:
+            logger.error(f"❌ Error in memory cleanup loop: {e}", exc_info=True)
+            # On error, wait 1 hour before retrying
+            await asyncio.sleep(60 * 60)
 
 
 async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: MemoryStore):
@@ -59,16 +99,26 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
             # Get all pending reminders
             pending_reminders = memory_store.get_all_pending_reminders()
             
+            now_ist = datetime.now(IST)
+            logger.debug(f"⏰ Reminder check at {now_ist.strftime('%I:%M:%S %p IST')} - Found {len(pending_reminders)} pending reminder(s)")
+            
             if not pending_reminders:
                 continue
-            
-            now_ist = datetime.now(IST)
             
             # Check each reminder
             for reminder in pending_reminders:
                 try:
                     reminder_dt_str = reminder.get("datetime")
+                    reminder_id = reminder.get("id")
+                    user_number = reminder.get("user_number")
+                    task = reminder.get("task", "Reminder")
+                    
                     if not reminder_dt_str:
+                        logger.warning(f"⚠️  Reminder {reminder_id} missing datetime field")
+                        continue
+                    
+                    if not user_number:
+                        logger.warning(f"⚠️  Reminder {reminder_id} missing user_number field")
                         continue
                     
                     # Parse datetime
@@ -76,16 +126,20 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
                     if reminder_dt.tzinfo is None:
                         reminder_dt = IST.localize(reminder_dt)
                     else:
+                        # Convert to IST for comparison
                         reminder_dt = reminder_dt.astimezone(IST)
                     
                     # Check if reminder is due (within the last 20 seconds for exact timing)
                     # This gives us some buffer but ensures we send it right after the scheduled time
                     time_diff = (now_ist - reminder_dt).total_seconds()
                     
+                    logger.debug(f"📋 Reminder {reminder_id[:8]}... for {user_number}: "
+                               f"Due at {reminder_dt.strftime('%I:%M:%S %p')}, "
+                               f"Time diff: {time_diff:.1f}s, "
+                               f"Status: {'DUE!' if 0 <= time_diff < 20 else 'waiting'}")
+                    
                     if 0 <= time_diff < 20:  # Due in the last 20 seconds (catches it on first check after due time)
-                        user_number = reminder.get("user_number")
-                        reminder_id = reminder.get("id")
-                        task = reminder.get("task", "Reminder")
+                        logger.info(f"🔔 FIRING REMINDER {reminder_id[:8]}... for {user_number} - '{task}'")
                         
                         # Send reminder notification
                         message = (
@@ -94,9 +148,14 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
                             f"Want me to snooze for 1 hour?"
                         )
                         
-                        # Format user number for WhatsApp (Meta uses +1234567890 format)
-                        whatsapp_number = user_number.replace("whatsapp:", "") if user_number.startswith("whatsapp:") else user_number
+                        # Format user number for WhatsApp
+                        # Meta format: Need to ensure it has + prefix
+                        if not user_number.startswith("+"):
+                            whatsapp_number = f"+{user_number}"
+                        else:
+                            whatsapp_number = user_number
                         
+                        logger.info(f"📤 Sending reminder to WhatsApp number: {whatsapp_number}")
                         success = await send_whatsapp_message(whatsapp_number, message)
                         
                         if success:
@@ -106,19 +165,19 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
                                 reminder_id,
                                 {"status": "sent", "sent_at": now_ist.isoformat()}
                             )
-                            logger.info(f"✅ Sent reminder to {user_number}: {task}")
+                            logger.info(f"✅ Successfully sent reminder to {whatsapp_number}: {task}")
                         else:
-                            logger.error(f"❌ Failed to send reminder to {user_number}")
+                            logger.error(f"❌ Failed to send reminder to {whatsapp_number} - send_whatsapp_message returned False")
                 
                 except Exception as e:
-                    logger.error(f"Error processing reminder: {e}", exc_info=True)
+                    logger.error(f"❌ Error processing reminder {reminder.get('id', 'unknown')}: {e}", exc_info=True)
                     continue
                     
         except asyncio.CancelledError:
             logger.info("🔄 Reminder checker loop cancelled")
             break
         except Exception as e:
-            logger.error(f"Error in reminder checker loop: {e}", exc_info=True)
+            logger.error(f"❌ Error in reminder checker loop: {e}", exc_info=True)
             await asyncio.sleep(15)  # Wait before retrying (faster recovery)
 
 
@@ -132,7 +191,7 @@ async def lifespan(app: FastAPI):
     startup_start = time.time()
     
     # Startup
-    global agent, _reminder_checker_task, rate_limiter, meta_client
+    global agent, _reminder_checker_task, _memory_cleanup_task, rate_limiter, meta_client
     
     logger.info("🚀 Starting Evara application...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
@@ -207,6 +266,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Failed to start reminder checker: {e}")
     
+    # Start memory cleanup background task
+    try:
+        if memory_store:
+            _memory_cleanup_task = asyncio.create_task(cleanup_old_memory_loop(memory_store))
+            logger.info("✅ Memory cleanup scheduler started (runs every 24 hours)")
+    except Exception as e:
+        logger.error(f"❌ Failed to start memory cleanup: {e}")
+    
     startup_time = time.time() - startup_start
     logger.info(f"✅ Evara is ready to receive messages! (Startup: {startup_time:.2f}s)")
     
@@ -251,6 +318,15 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         logger.info("✅ Reminder checker stopped")
+    
+    # Cancel memory cleanup task
+    if _memory_cleanup_task:
+        _memory_cleanup_task.cancel()
+        try:
+            await _memory_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("✅ Memory cleanup stopped")
     
     # Cancel browser preload task if still running
     if browser_preload_task and not browser_preload_task.done():
@@ -386,6 +462,43 @@ async def root():
             "error": str(e)[:100],
             "app": "Evara"
         }
+
+
+@app.get("/debug/reminders")
+async def debug_reminders():
+    """Debug endpoint to check pending reminders."""
+    try:
+        memory_store = MemoryStore()
+        pending = memory_store.get_all_pending_reminders()
+        now_ist = datetime.now(IST)
+        
+        reminders_info = []
+        for r in pending:
+            reminder_dt = datetime.fromisoformat(r.get("datetime"))
+            if reminder_dt.tzinfo is None:
+                reminder_dt = IST.localize(reminder_dt)
+            else:
+                reminder_dt = reminder_dt.astimezone(IST)
+            
+            time_diff = (now_ist - reminder_dt).total_seconds()
+            
+            reminders_info.append({
+                "id": r.get("id"),
+                "task": r.get("task"),
+                "user": r.get("user_number"),
+                "scheduled_time": reminder_dt.strftime('%Y-%m-%d %I:%M:%S %p %Z'),
+                "time_diff_seconds": time_diff,
+                "status": "DUE" if 0 <= time_diff < 20 else ("PAST" if time_diff >= 20 else "FUTURE")
+            })
+        
+        return {
+            "current_time_ist": now_ist.strftime('%Y-%m-%d %I:%M:%S %p %Z'),
+            "pending_reminders_count": len(pending),
+            "reminders": reminders_info
+        }
+    except Exception as e:
+        logger.error(f"Error in debug_reminders: {e}", exc_info=True)
+        return {"error": str(e)}
 
 
 @app.get("/health")
