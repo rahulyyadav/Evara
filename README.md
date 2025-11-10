@@ -567,7 +567,8 @@ See comprehensive guides in `docs/`:
 
 ## 📞 Contact & Links
 
-**Built by:** Rahul Yadav  
+**Built by:** Rahul Yadav
+**Portfolio:** [rahul-yadav.com.np](https://www.rahul-yadav.com.np)  
 **LinkedIn:** [linkedin.com/in/rahulyyadav](https://www.linkedin.com/in/rahulyyadav)  
 **GitHub:** [github.com/rahulyyadav](https://github.com/rahulyyadav)  
 **Live API:** [evara-8w6h.onrender.com](https://evara-8w6h.onrender.com/health)
