@@ -117,14 +117,17 @@ class FlightSearchTool:
             }
         
         # Parse and normalize date
+        logger.info(f"📅 Parsing date: '{date}'")
         parsed_date = await self._parse_date(date)
         if not parsed_date:
+            logger.warning(f"❌ Failed to parse date: '{date}'")
             return {
                 "success": False,
                 "needs_clarification": True,
                 "message": "I couldn't understand the date. Please specify a date like 'Dec 15', 'next Friday', or '2024-12-15'.",
                 "tool": "flight_search"
             }
+        logger.info(f"✅ Parsed date: '{date}' → {parsed_date}")
         
         # Validate date is in the future (using IST timezone for accuracy)
         try:
@@ -443,8 +446,14 @@ Respond with ONLY the 3-letter uppercase airport code, nothing else. If you cann
         url = "https://serpapi.com/search"
         
         # Convert city names to airport codes using Gemini
+        logger.info(f"🔄 Converting city names to airport codes...")
+        logger.info(f"   Origin: '{origin}'")
         origin_code = await self._get_airport_code(origin)
+        logger.info(f"   Origin code: {origin_code if origin_code else 'FAILED - using ' + origin.upper()}")
+        
+        logger.info(f"   Destination: '{destination}'")
         destination_code = await self._get_airport_code(destination)
+        logger.info(f"   Destination code: {destination_code if destination_code else 'FAILED - using ' + destination.upper()}")
         
         # If we couldn't get airport codes, use the original (might already be codes)
         departure_id = origin_code if origin_code else origin.upper()
@@ -464,14 +473,17 @@ Respond with ONLY the 3-letter uppercase airport code, nothing else. If you cann
             # Note: Omitting 'type' parameter for one-way flights
         }
         
-        logger.info(f"Using airport codes: {departure_id} -> {arrival_id}")
+        logger.info(f"✈️ SerpAPI Request: {departure_id} -> {arrival_id} on {date}")
+        logger.info(f"📋 Full params: {params}")
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                logger.info(f"📡 Sending request to SerpAPI...")
                 response = await client.get(url, params=params)
                 
                 # Log the request for debugging
-                logger.debug(f"SerpAPI request URL: {response.request.url}")
+                logger.info(f"📡 SerpAPI Status Code: {response.status_code}")
+                logger.info(f"📡 SerpAPI request URL: {response.request.url}")
                 
                 # Check for 400 errors and get detailed error message
                 if response.status_code == 400:
