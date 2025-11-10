@@ -460,17 +460,17 @@ Respond with ONLY the 3-letter uppercase airport code, nothing else. If you cann
         arrival_id = destination_code if destination_code else destination.upper()
         
         # SerpAPI expects uppercase 3-letter airport codes
-        # For one-way flights, omit the 'type' parameter or use '1' for round trip (but we need return_date then)
+        # type=2 for one-way flights, type=1 for round trip (requires return_date)
         params = {
             "engine": "google_flights",
             "api_key": settings.SERPAPI_KEY,
             "departure_id": departure_id,
             "arrival_id": arrival_id,
             "outbound_date": date,
+            "type": "2",  # 2 = one-way, 1 = round trip
             "currency": "INR",
             "hl": "en",
             "gl": "in"  # India
-            # Note: Omitting 'type' parameter for one-way flights
         }
         
         logger.info(f"✈️ SerpAPI Request: {departure_id} -> {arrival_id} on {date}")
