@@ -186,8 +186,8 @@ class AgentOrchestrator:
                 # Show last 10 conversations for better context awareness
                 for idx, conv in enumerate(recent_conversations[-10:], 1):
                     context += f"Turn {idx}:\n"
-                    context += f"  User: {conv.get('message', '')}\n"
-                    context += f"  Assistant: {conv.get('response', '')}\n"
+                    context += f"  User: {conv.get('user_message', '')}\n"
+                    context += f"  Assistant: {conv.get('agent_response', '')}\n"
                     intent = conv.get('intent', '')
                     if intent:
                         context += f"  Intent: {intent}\n"
@@ -608,8 +608,8 @@ Important:
                 # Show last 10 conversations for better context
                 for idx, conv in enumerate(recent_conversations[-10:], 1):
                     context += f"[Turn {idx}]\n"
-                    context += f"User: {conv.get('message', '')}\n"
-                    context += f"Assistant: {conv.get('response', '')}\n"
+                    context += f"User: {conv.get('user_message', '')}\n"
+                    context += f"Assistant: {conv.get('agent_response', '')}\n"
                     intent = conv.get('intent', '')
                     tool = conv.get('tool_used', '')
                     if intent:
