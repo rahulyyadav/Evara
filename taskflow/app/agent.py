@@ -107,9 +107,9 @@ class AgentOrchestrator:
         logger.info(f"🤖 Processing message from {user_number}: {message[:100]}...")
         
         try:
-            # Load user memory for context
+            # Load user memory for context - USE ALL AVAILABLE HISTORY (up to 50 messages)
             user_memory = self.memory_store.get_user_memory(user_number)
-            recent_conversations = self.memory_store.get_recent_conversations(user_number, limit=5)
+            recent_conversations = self.memory_store.get_recent_conversations(user_number, limit=50)
             
             # Classify intent and extract entities
             intent_result = await self._classify_intent(message, recent_conversations)
@@ -178,13 +178,21 @@ class AgentOrchestrator:
             return self._fallback_intent_classification(message)
         
         try:
-            # Build context from recent conversations
+            # Build context from recent conversations - USE MORE HISTORY FOR BETTER CONTEXT
             context = ""
             if recent_conversations:
-                context = "Recent conversation history:\n"
-                for conv in recent_conversations[-3:]:  # Last 3 conversations
-                    context += f"User: {conv.get('message', '')}\n"
-                    context += f"Assistant: {conv.get('response', '')}\n\n"
+                context = "=== CONVERSATION HISTORY (Last 10 messages) ===\n"
+                context += "IMPORTANT: Use this history to understand context and fill in missing information!\n\n"
+                # Show last 10 conversations for better context awareness
+                for idx, conv in enumerate(recent_conversations[-10:], 1):
+                    context += f"Turn {idx}:\n"
+                    context += f"  User: {conv.get('message', '')}\n"
+                    context += f"  Assistant: {conv.get('response', '')}\n"
+                    intent = conv.get('intent', '')
+                    if intent:
+                        context += f"  Intent: {intent}\n"
+                    context += "\n"
+                context += "=== END OF CONVERSATION HISTORY ===\n\n"
             
             # Create structured prompt for intent classification
             prompt = f"""You are an AI assistant that classifies user messages into intents and extracts entities intelligently.
@@ -198,7 +206,55 @@ Available intents:
 
 {context}
 
-User message: "{message}"
+Current user message: "{message}"
+
+🔥 CRITICAL CONTEXT-AWARENESS INSTRUCTIONS 🔥
+
+BEFORE analyzing the current message, ALWAYS:
+1. READ the ENTIRE conversation history above carefully
+2. CHECK if the current message is incomplete or missing information
+3. LOOK for missing information in PREVIOUS messages from the conversation history
+4. MERGE information from previous turns with the current message
+
+Examples of context merging:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLE 1: User provides information across multiple turns
+  Previous Turn: "search flight for me on 2nd dec"
+    → Has: date="2nd dec"
+    → Missing: origin, destination
+  Current Turn: "chennai to bagdogra"
+    → Has: origin="chennai", destination="bagdogra"
+    → Missing: date
+  ✅ MERGE: date="2nd dec", origin="chennai", destination="bagdogra"
+
+EXAMPLE 2: User asks follow-up question
+  Previous Turn: "track iPhone 15 price"
+    → User wants to track iPhone 15
+  Current Turn: "what is the price now?"
+    → Refers to iPhone 15 from previous turn
+  ✅ MERGE: product="iPhone 15", price_action="check"
+
+EXAMPLE 3: User provides partial info then completes it
+  Previous Turn: "I want to fly to mumbai"
+    → Has: destination="mumbai"
+  Current Turn: "from bangalore tomorrow"
+    → Has: origin="bangalore", date="tomorrow"
+  ✅ MERGE: origin="bangalore", destination="mumbai", date="tomorrow"
+
+EXAMPLE 4: User clarifies previous request
+  Previous Turn: "remind me"
+    → Missing: task and time
+  Current Turn: "to call doctor at 3pm tomorrow"
+    → Has: task="call doctor", time="3pm tomorrow"
+  ✅ MERGE: reminder_text="call doctor", reminder_time="3pm tomorrow"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+HOW TO EXTRACT ENTITIES WITH CONTEXT:
+1. Extract entities from the CURRENT message first
+2. If any critical entity is missing, CHECK THE CONVERSATION HISTORY
+3. Look for relevant entities in previous 2-3 turns
+4. COMBINE entities from current + previous messages
+5. Only set needs_clarification=true if information is STILL missing after checking history
 
 Analyze the message and respond with ONLY a valid JSON object in this exact format:
 {{
@@ -544,13 +600,25 @@ Important:
             return self._fallback_response_generation(intent, tool_result)
         
         try:
-            # Build context
+            # Build context - USE MORE HISTORY FOR CONTEXT-AWARE RESPONSES
             context = ""
             if recent_conversations:
-                context = "Recent conversation:\n"
-                for conv in recent_conversations[-2:]:
+                context = "=== CONVERSATION MEMORY (Last 10 messages) ===\n"
+                context += "IMPORTANT: Use this conversation history to provide context-aware responses!\n\n"
+                # Show last 10 conversations for better context
+                for idx, conv in enumerate(recent_conversations[-10:], 1):
+                    context += f"[Turn {idx}]\n"
                     context += f"User: {conv.get('message', '')}\n"
-                    context += f"Assistant: {conv.get('response', '')}\n\n"
+                    context += f"Assistant: {conv.get('response', '')}\n"
+                    intent = conv.get('intent', '')
+                    tool = conv.get('tool_used', '')
+                    if intent:
+                        context += f"(Intent: {intent}"
+                        if tool:
+                            context += f", Tool: {tool}"
+                        context += ")\n"
+                    context += "\n"
+                context += "=== END OF CONVERSATION MEMORY ===\n\n"
             
             # Get current date/time information
             now_ist = datetime.now(IST)
@@ -662,9 +730,40 @@ CRITICAL: Do NOT mention any of this information (name, creator, contact) unless
 
 {context}
 
-User asked: "{message}"
+Current user message: "{message}"
 
-Please provide a helpful, accurate, and concise answer to the user's question. 
+🧠 MEMORY-AWARE RESPONSE INSTRUCTIONS 🧠
+
+IMPORTANT: You have access to the full conversation history above. Use it to:
+
+1. **Understand Context**: Read the conversation history to understand what the user has been discussing
+2. **Reference Previous Discussions**: If the user refers to something mentioned earlier, acknowledge it
+3. **Maintain Continuity**: Keep track of ongoing discussions or multi-turn requests
+4. **Personalize Responses**: Use information from previous conversations to provide personalized answers
+5. **Avoid Repetition**: Don't repeat information you've already provided unless asked
+
+Examples of memory-aware responses:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Example 1: Follow-up question
+  Previous: User asked "what is the capital of France?"
+  Current: "and what about Germany?"
+  ✅ Good response: "The capital of Germany is Berlin!"
+  ❌ Bad response: "What country are you asking about?"
+
+Example 2: Continuing discussion
+  Previous: User was discussing trip planning
+  Current: "what's the weather like there?"
+  ✅ Good response: "In [destination from previous turns], the weather is..."
+  ❌ Bad response: "Where do you mean?"
+
+Example 3: Reference to previous action
+  Previous: User tracked iPhone price
+  Current: "did you get it?"
+  ✅ Good response: "Yes! I'm tracking the iPhone 15 price for you..."
+  ❌ Bad response: "Get what?"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Response Guidelines:
 - Answer general knowledge questions directly and accurately
 - For time/date questions, ALWAYS use the current time information provided above
 - If asked about time in other timezones, convert from IST (the current time shown above)
@@ -674,6 +773,7 @@ Please provide a helpful, accurate, and concise answer to the user's question.
 - Format for WhatsApp (short paragraphs, easy to read)
 - If you don't know something, say so honestly
 - Only mention information about Evara's creator/contact if the user explicitly asks
+- USE THE CONVERSATION HISTORY to provide contextual, intelligent responses
 
 Respond directly with your answer, no JSON or code blocks. Just the answer text."""
             else:
@@ -711,23 +811,58 @@ CRITICAL: Do NOT mention any of this information (name, creator, contact) unless
 
 {context}
 
-User message: "{message}"
+Current user message: "{message}"
 Detected intent: {intent}
 Extracted entities: {json.dumps(entities, indent=2)}
 {tool_info}
 
+🧠 MEMORY-AWARE RESPONSE INSTRUCTIONS 🧠
+
+IMPORTANT: You have access to the full conversation history above. Use it wisely!
+
+When generating your response:
+1. **Check Conversation History**: Read what you and the user have discussed previously
+2. **Understand Context**: If the user references something from earlier, acknowledge it
+3. **Maintain Continuity**: Keep track of multi-turn requests and ongoing tasks
+4. **Smart Clarification**: Before asking for clarification, check if the info exists in previous messages
+5. **Personalized Responses**: Use conversation history to provide tailored, context-aware answers
+6. **Avoid Redundancy**: Don't repeat information unnecessarily
+
+Examples of context-aware responses:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Example 1: User provided partial info earlier
+  History shows: User asked for flights on "2nd dec"
+  Current: "chennai to bagdogra"
+  ✅ Good: "Great! Let me search for flights from Chennai to Bagdogra on December 2nd..."
+  ❌ Bad: "Which date did you want to fly?"
+
+Example 2: Follow-up to previous action
+  History shows: User tracked iPhone 15 price
+  Current: "what's the price now?"
+  ✅ Good: "The current price for iPhone 15 is ₹79,990..."
+  ❌ Bad: "Which product price do you want to know?"
+
+Example 3: Continuing conversation
+  History shows: User was discussing weather in Mumbai
+  Current: "should I carry an umbrella?"
+  ✅ Good: "In Mumbai this time of year, yes! It's monsoon season..."
+  ❌ Bad: "Where are you going?"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 Generate a friendly, concise response (under 1600 characters) that:
 1. Is natural and conversational
-2. Addresses the user's request
-3. If tool was executed, explains the result clearly
-4. If clarification is needed, asks a helpful question in a friendly way (e.g., "I'd be happy to help! Could you tell me [missing info]?")
-5. Uses emojis appropriately (but not excessively)
-6. Is formatted for WhatsApp (short paragraphs, bullet points if needed)
-7. Only mention information about Evara's creator/contact if the user explicitly asks
-8. For flight search: If clarification is needed, be helpful and ask for missing info (origin, destination, or date) in a friendly, conversational way
-9. For time/date questions: ALWAYS use the current time information provided above
+2. Uses conversation history to provide context-aware responses
+3. Addresses the user's request intelligently
+4. If tool was executed, explains the result clearly
+5. If clarification is needed, first check conversation history, then ask (e.g., "I'd be happy to help! Could you tell me [missing info]?")
+6. Uses emojis appropriately (but not excessively)
+7. Is formatted for WhatsApp (short paragraphs, bullet points if needed)
+8. Only mention information about Evara's creator/contact if the user explicitly asks
+9. For flight search: Check history for missing info before asking for clarification
+10. For time/date questions: ALWAYS use the current time information provided above
+11. References previous conversations naturally when relevant
 
-Respond directly with the message text, no JSON or code blocks."""
+Respond directly with the message text, no JSON or code blocks.
             
             response = await self._call_gemini_with_retry(prompt, max_retries=3)
             
