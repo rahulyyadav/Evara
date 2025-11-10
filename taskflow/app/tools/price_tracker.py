@@ -64,6 +64,16 @@ class PriceTrackerTool:
         self.browser: Optional[Browser] = None
         self._playwright = None
         
+        # Initialize Gemini model for intelligent product selection
+        self.gemini_model = None
+        if GEMINI_AVAILABLE:
+            try:
+                genai.configure(api_key=settings.GEMINI_API_KEY)
+                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                logger.info("✅ Gemini model initialized for price tracker")
+            except Exception as e:
+                logger.warning(f"Could not initialize Gemini model: {e}")
+        
         if not PLAYWRIGHT_AVAILABLE and not BEAUTIFULSOUP_AVAILABLE:
             logger.warning("Neither Playwright nor BeautifulSoup installed - price tracking will not work")
         elif not PLAYWRIGHT_AVAILABLE:
@@ -438,45 +448,66 @@ class PriceTrackerTool:
         
         try:
             logger.info(f"🔍 Searching Google Shopping for: {product_name}")
+            logger.info(f"📋 SerpAPI config - Key present: {bool(settings.SERPAPI_KEY)}, Gemini available: {self.gemini_model is not None}")
             
             # Search Google Shopping
-            search = GoogleSearch({
+            search_params = {
                 "q": product_name,
                 "engine": "google_shopping",
                 "api_key": settings.SERPAPI_KEY,
                 "gl": "in",  # India
                 "hl": "en"
-            })
+            }
+            logger.info(f"📡 Calling SerpAPI Google Shopping with query: '{product_name}'")
             
+            search = GoogleSearch(search_params)
             results = search.get_dict()
+            
+            logger.info(f"📦 SerpAPI response keys: {list(results.keys())}")
             shopping_results = results.get("shopping_results", [])
+            logger.info(f"📊 Found {len(shopping_results)} shopping results")
             
             if not shopping_results:
-                logger.warning(f"No shopping results found for: {product_name}")
+                logger.warning(f"⚠️  No shopping results found for: {product_name}")
                 return None
             
             # Get top 5 results
             top_results = shopping_results[:5]
+            logger.info(f"✅ Got top {len(top_results)} results")
+            
+            # Log first result for debugging
+            if top_results:
+                first = top_results[0]
+                logger.info(f"🏆 First result: {first.get('title', 'N/A')[:50]}... - ₹{first.get('extracted_price', first.get('price', 'N/A'))}")
             
             # Use Gemini to select the best match if available
             if self.gemini_model and len(top_results) > 1:
+                logger.info(f"🤖 Using Gemini to select best product from {len(top_results)} options")
                 selected_result = await self._select_best_product_with_gemini(product_name, top_results)
                 if selected_result:
+                    logger.info(f"✅ Gemini selected: {selected_result.get('title', 'N/A')[:50]}...")
                     return self._format_serpapi_result(selected_result)
+                else:
+                    logger.warning("⚠️  Gemini selection failed, using first result")
             
             # Otherwise, use the first result
             best_result = top_results[0]
+            logger.info(f"✅ Using first result: {best_result.get('title', 'N/A')[:50]}...")
             return self._format_serpapi_result(best_result)
             
         except Exception as e:
-            logger.error(f"Error searching with SerpAPI: {e}", exc_info=True)
+            logger.error(f"❌ Error searching with SerpAPI: {e}", exc_info=True)
             return None
     
     def _format_serpapi_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Format SerpAPI result into standardized product data."""
         try:
+            logger.info(f"🔧 Formatting SerpAPI result...")
+            
             # Extract price
             price_str = result.get("extracted_price") or result.get("price", "0")
+            logger.info(f"💰 Raw price data: {price_str}")
+            
             try:
                 if isinstance(price_str, (int, float)):
                     price = float(price_str)
@@ -485,8 +516,9 @@ class PriceTrackerTool:
                     price = float(re.sub(r'[^\d.]', '', str(price_str)))
             except:
                 price = 0.0
+                logger.warning(f"⚠️  Could not parse price: {price_str}")
             
-            return {
+            formatted = {
                 "title": result.get("title", "Unknown Product"),
                 "current_price": price,
                 "url": result.get("link", ""),
@@ -496,8 +528,12 @@ class PriceTrackerTool:
                 "thumbnail": result.get("thumbnail"),
                 "tracked_since": datetime.now().isoformat()
             }
+            
+            logger.info(f"✅ Formatted product: {formatted['title'][:50]}... - ₹{formatted['current_price']}")
+            return formatted
+            
         except Exception as e:
-            logger.error(f"Error formatting SerpAPI result: {e}")
+            logger.error(f"❌ Error formatting SerpAPI result: {e}", exc_info=True)
             return None
     
     async def _select_best_product_with_gemini(
