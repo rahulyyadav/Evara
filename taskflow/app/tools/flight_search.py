@@ -1,12 +1,14 @@
 """
 Flight search tool for TaskFlow.
 Uses SerpAPI to search for flights and return results.
+Enhanced with accurate date tracking and parsing.
 """
 import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
+import pytz
 
 try:
     import google.generativeai as genai
@@ -23,6 +25,9 @@ import httpx
 from ..config import settings
 
 logger = logging.getLogger("taskflow")
+
+# IST timezone for accurate date tracking
+IST = pytz.timezone('Asia/Kolkata')
 
 
 class FlightSearchTool:
@@ -121,15 +126,18 @@ class FlightSearchTool:
                 "tool": "flight_search"
             }
         
-        # Validate date is in the future
+        # Validate date is in the future (using IST timezone for accuracy)
         try:
             parsed_dt = datetime.strptime(parsed_date, "%Y-%m-%d")
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            if parsed_dt < today:
+            today_ist = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+            if parsed_dt < today_ist:
+                # Format date nicely for user
+                parsed_display = parsed_dt.strftime("%B %d, %Y")
+                today_display = today_ist.strftime("%B %d, %Y")
                 return {
                     "success": False,
                     "needs_clarification": True,
-                    "message": f"That date ({parsed_date}) is in the past. Please provide a future date for your flight search.",
+                    "message": f"That date ({parsed_display}) is in the past. Today is {today_display}. Please provide a future date for your flight search.",
                     "tool": "flight_search"
                 }
         except ValueError:
@@ -199,7 +207,9 @@ class FlightSearchTool:
                 logger.warning(f"Gemini date parsing failed: {e}")
         
         # Fallback: try to extract date from common patterns
-        today = datetime.now()
+        # Use IST timezone for accurate date tracking
+        today_ist = datetime.now(IST)
+        today = today_ist.replace(tzinfo=None)  # For calculations
         
         # Handle relative dates
         date_lower = date_str.lower()
@@ -209,6 +219,8 @@ class FlightSearchTool:
             return (today + timedelta(days=1)).strftime("%Y-%m-%d")
         elif "next week" in date_lower:
             return (today + timedelta(days=7)).strftime("%Y-%m-%d")
+        elif "day after tomorrow" in date_lower:
+            return (today + timedelta(days=2)).strftime("%Y-%m-%d")
         
         # Handle "next [day of week]" patterns
         import re
@@ -257,47 +269,87 @@ class FlightSearchTool:
     
     async def _parse_date_with_gemini(self, date_str: str) -> Optional[str]:
         """
-        Use Gemini to parse flexible date strings.
+        Use Gemini to parse flexible date strings with accurate current date context.
         
         Args:
-            date_str: Flexible date string
+            date_str: Flexible date string (e.g., "next Friday", "Dec 3rd", "this weekend")
             
         Returns:
-            Date in YYYY-MM-DD format or None
+            Date in YYYY-MM-DD format or None if parsing fails
         """
         if not self.gemini_model:
             return None
         
-        today = datetime.now()
-        day_of_week = today.strftime("%A")  # Monday, Tuesday, etc.
-        
-        prompt = f"""Parse this date string into YYYY-MM-DD format. 
+        try:
+            # Get current date/time in IST (accurate tracking)
+            now_ist = datetime.now(IST)
+            now_utc = datetime.now(pytz.UTC)
+            
+            # Build comprehensive date context (like we did for time tracking)
+            current_date_info = f"""Current Date and Time Information (CRITICAL - Use this for date parsing):
 
-Today is {today.strftime("%Y-%m-%d")} ({day_of_week}).
+BASE TIME (India Standard Time - IST):
+- Current date: {now_ist.strftime('%B %d, %Y')} ({now_ist.strftime('%Y-%m-%d')})
+- Current day of week: {now_ist.strftime('%A')}
+- Current month: {now_ist.strftime('%B')} (month {now_ist.month})
+- Current year: {now_ist.year}
+- Current time: {now_ist.strftime('%I:%M %p IST')}
+- Today's date (DD/MM/YYYY): {now_ist.strftime('%d/%m/%Y')}
+- UTC time: {now_utc.strftime('%Y-%m-%d %I:%M %p UTC')}
 
-Date string: "{date_str}"
+IMPORTANT DATE PARSING RULES:
+1. ALWAYS use the current date shown above as reference
+2. If year is not mentioned:
+   - Use {now_ist.year} if the month/day is >= current date
+   - Use {now_ist.year + 1} if the month/day has already passed this year
+3. For "next [day of week]", calculate from {now_ist.strftime('%A')} ({now_ist.strftime('%Y-%m-%d')})
+4. For "tomorrow", add 1 day to {now_ist.strftime('%Y-%m-%d')}
+5. For "this weekend", use the upcoming Saturday
+6. For relative dates like "in 3 days", add to {now_ist.strftime('%Y-%m-%d')}
+7. Be accurate with month boundaries (e.g., if today is Dec 30, "next Monday" is in next year)
 
-Examples:
-- "next Tuesday" = next occurrence of Tuesday
-- "next Friday" = next occurrence of Friday  
-- "Dec 3rd" or "Dec 3" = December 3 (current or next year if past)
-- "tomorrow" = {today.strftime("%Y-%m-%d")}
-- "next week" = 7 days from today
+Examples based on today being {now_ist.strftime('%B %d, %Y')}:
+- "tomorrow" = {(now_ist + timedelta(days=1)).strftime('%Y-%m-%d')}
+- "next week" = {(now_ist + timedelta(days=7)).strftime('%Y-%m-%d')}
+- If user says "Dec 10": determine year based on whether Dec 10 has passed
+- If user says "next Friday": calculate next Friday from {now_ist.strftime('%A, %B %d')}
+"""
+            
+            prompt = f"""{current_date_info}
+
+Date string to parse: "{date_str}"
+
+Parse this into YYYY-MM-DD format using the current date information provided above.
+
+CRITICAL: Use the exact current date ({now_ist.strftime('%Y-%m-%d')}) shown above for all calculations.
 
 Respond with ONLY the date in YYYY-MM-DD format, nothing else. If you cannot parse it, respond with "null"."""
-        
-        try:
+            
             response = self.gemini_model.generate_content(prompt)
             result = response.text.strip()
             
+            # Validate the result
             if result.lower() == "null" or not result:
                 return None
             
-            # Validate the date format
+            # Try to parse the result to ensure it's valid
             try:
-                datetime.strptime(result, "%Y-%m-%d")
+                parsed_dt = datetime.strptime(result, "%Y-%m-%d")
+                
+                # Extra validation: ensure date is not in the past
+                today_date = now_ist.date()
+                if parsed_dt.date() < today_date:
+                    logger.warning(f"Gemini returned past date: {result} (today is {today_date})")
+                    # Try to fix: assume they meant next year
+                    if parsed_dt.month >= now_ist.month:  # Same or later month, but past year
+                        fixed_date = parsed_dt.replace(year=now_ist.year + 1)
+                        logger.info(f"Fixed past date to next year: {fixed_date.strftime('%Y-%m-%d')}")
+                        return fixed_date.strftime("%Y-%m-%d")
+                    return None
+                
                 return result
             except ValueError:
+                logger.warning(f"Gemini returned invalid date format: {result}")
                 return None
                 
         except Exception as e:

@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+import pytz
 
 try:
     import google.generativeai as genai
@@ -23,6 +24,9 @@ from .memory import MemoryStore
 from .tools import FlightSearchTool, PriceTrackerTool, ReminderTool
 
 logger = logging.getLogger("taskflow")
+
+# IST timezone for current time
+IST = pytz.timezone('Asia/Kolkata')
 
 
 class AgentOrchestrator:
@@ -548,6 +552,79 @@ Important:
                     context += f"User: {conv.get('message', '')}\n"
                     context += f"Assistant: {conv.get('response', '')}\n\n"
             
+            # Get current date/time information
+            now_ist = datetime.now(IST)
+            now_utc = datetime.now(pytz.UTC)
+            
+            # Get times for common countries
+            timezones_info = {
+                "Nepal": pytz.timezone('Asia/Kathmandu'),  # UTC+5:45
+                "USA (Eastern)": pytz.timezone('America/New_York'),  # EST/EDT
+                "USA (Pacific)": pytz.timezone('America/Los_Angeles'),  # PST/PDT
+                "USA (Central)": pytz.timezone('America/Chicago'),  # CST/CDT
+                "UK": pytz.timezone('Europe/London'),  # GMT/BST
+                "Norway": pytz.timezone('Europe/Oslo'),  # CET/CEST
+                "Germany": pytz.timezone('Europe/Berlin'),  # CET/CEST
+                "Japan": pytz.timezone('Asia/Tokyo'),  # JST
+                "Australia (Sydney)": pytz.timezone('Australia/Sydney'),  # AEDT/AEST
+                "UAE": pytz.timezone('Asia/Dubai'),  # GST
+                "Singapore": pytz.timezone('Asia/Singapore'),  # SGT
+                "China": pytz.timezone('Asia/Shanghai'),  # CST
+            }
+            
+            # Build timezone examples
+            timezone_examples = []
+            for country, tz in timezones_info.items():
+                try:
+                    now_tz = datetime.now(tz)
+                    timezone_examples.append(f"- {country}: {now_tz.strftime('%I:%M %p %Z')} ({now_tz.strftime('%B %d, %Y')})")
+                except:
+                    pass
+            
+            current_time_info = f"""Current Date and Time Information (IMPORTANT - Use this for all time/date questions):
+
+BASE TIME (India Standard Time - IST):
+- Current date: {now_ist.strftime('%B %d, %Y')}
+- Current time in India (IST): {now_ist.strftime('%I:%M:%S %p %Z')}
+- Current day of week: {now_ist.strftime('%A')}
+- Current date (DD/MM/YYYY): {now_ist.strftime('%d/%m/%Y')}
+- ISO format: {now_ist.isoformat()}
+- UTC time: {now_utc.strftime('%I:%M:%S %p %Z')} ({now_utc.strftime('%B %d, %Y')})
+- IST is UTC+5:30
+
+CURRENT TIME IN OTHER COUNTRIES (calculated from IST):
+{chr(10).join(timezone_examples)}
+
+When answering questions about:
+- Current time in ANY country or timezone
+- "What time is it in [country]?"
+- "What time is it right now in [country]?"
+- "What is the time in [country]?"
+- Current date anywhere
+- Timezone conversions
+
+INSTRUCTIONS:
+1. ALWAYS use the IST time shown above as the base reference
+2. For any country/timezone question, convert from IST (UTC+5:30) to the requested timezone
+3. If the country is listed above, use that exact time
+4. If the country is not listed, calculate the timezone offset from UTC and convert from IST
+5. Be accurate with timezone conversions - consider daylight saving time (DST) where applicable
+6. Always mention the timezone name (e.g., "IST", "PST", "CET") in your response
+7. For countries with multiple timezones (like USA), mention which timezone you're using (e.g., "Eastern Time" or "Pacific Time")
+
+Common timezone offsets from UTC:
+- Nepal: UTC+5:45
+- India: UTC+5:30
+- Pakistan: UTC+5:00
+- Bangladesh: UTC+6:00
+- USA Eastern: UTC-5:00 (EST) or UTC-4:00 (EDT)
+- USA Pacific: UTC-8:00 (PST) or UTC-7:00 (PDT)
+- UK: UTC+0:00 (GMT) or UTC+1:00 (BST)
+- Norway/Germany: UTC+1:00 (CET) or UTC+2:00 (CEST)
+- Japan: UTC+9:00 (JST)
+- Australia Sydney: UTC+10:00 (AEST) or UTC+11:00 (AEDT)
+"""
+            
             # Build prompt
             tool_info = ""
             if tool_result:
@@ -581,12 +658,16 @@ CRITICAL: Do NOT mention any of this information (name, creator, contact) unless
 
 {evara_info}
 
+{current_time_info}
+
 {context}
 
 User asked: "{message}"
 
 Please provide a helpful, accurate, and concise answer to the user's question. 
 - Answer general knowledge questions directly and accurately
+- For time/date questions, ALWAYS use the current time information provided above
+- If asked about time in other timezones, convert from IST (the current time shown above)
 - Be conversational and friendly
 - Use emojis sparingly (1-2 max)
 - Keep response under 1600 characters
@@ -626,6 +707,8 @@ CRITICAL: Do NOT mention any of this information (name, creator, contact) unless
 
 {evara_info}
 
+{current_time_info}
+
 {context}
 
 User message: "{message}"
@@ -642,6 +725,7 @@ Generate a friendly, concise response (under 1600 characters) that:
 6. Is formatted for WhatsApp (short paragraphs, bullet points if needed)
 7. Only mention information about Evara's creator/contact if the user explicitly asks
 8. For flight search: If clarification is needed, be helpful and ask for missing info (origin, destination, or date) in a friendly, conversational way
+9. For time/date questions: ALWAYS use the current time information provided above
 
 Respond directly with the message text, no JSON or code blocks."""
             

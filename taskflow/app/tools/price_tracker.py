@@ -1,11 +1,13 @@
 """
 Price tracking tool for TaskFlow.
-Uses Playwright to scrape product prices from Amazon and other e-commerce sites.
+Uses Google Shopping API (via SerpAPI) for product price search.
+Falls back to web scraping if API is not available.
 """
 import asyncio
 import logging
 import re
 import uuid
+import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from urllib.parse import urlparse, quote
@@ -25,6 +27,20 @@ try:
 except ImportError:
     BEAUTIFULSOUP_AVAILABLE = False
     BeautifulSoup = None
+
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    genai = None
+
+try:
+    from serpapi import GoogleSearch
+    SERPAPI_AVAILABLE = True
+except ImportError:
+    SERPAPI_AVAILABLE = False
+    GoogleSearch = None
 
 import httpx
 
@@ -125,13 +141,20 @@ class PriceTrackerTool:
                         "tool": "price_tracker"
                     }
             
-            # If product name provided, search on Amazon
+            # If product name provided, search using Google Shopping API
             elif product_name:
-                product_data = await self._search_and_get_product(product_name)
+                # First try SerpAPI Google Shopping search (fastest and most reliable)
+                product_data = await self._search_product_with_serpapi(product_name)
+                
+                # If SerpAPI fails, fall back to web scraping
+                if not product_data:
+                    logger.info("SerpAPI search failed, falling back to Amazon scraping")
+                    product_data = await self._search_and_get_product(product_name)
+                
                 if not product_data:
                     return {
                         "success": False,
-                        "message": "Couldn't find that product. Send me the direct link?",
+                        "message": f"❌ Couldn't find '{product_name}' on shopping sites. Please check the product name and try again.",
                         "tool": "price_tracker"
                     }
             
@@ -394,6 +417,137 @@ class PriceTrackerTool:
                 "message": f"Error checking prices: {str(e)}",
                 "tool": "price_tracker"
             }
+    
+    async def _search_product_with_serpapi(self, product_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Search for product using Google Shopping via SerpAPI.
+        
+        Args:
+            product_name: Product name to search
+            
+        Returns:
+            Product data dictionary with title, price, url, etc. or None
+        """
+        if not SERPAPI_AVAILABLE:
+            logger.debug("SerpAPI not available")
+            return None
+        
+        if not settings.SERPAPI_KEY:
+            logger.debug("SERPAPI_KEY not configured")
+            return None
+        
+        try:
+            logger.info(f"🔍 Searching Google Shopping for: {product_name}")
+            
+            # Search Google Shopping
+            search = GoogleSearch({
+                "q": product_name,
+                "engine": "google_shopping",
+                "api_key": settings.SERPAPI_KEY,
+                "gl": "in",  # India
+                "hl": "en"
+            })
+            
+            results = search.get_dict()
+            shopping_results = results.get("shopping_results", [])
+            
+            if not shopping_results:
+                logger.warning(f"No shopping results found for: {product_name}")
+                return None
+            
+            # Get top 5 results
+            top_results = shopping_results[:5]
+            
+            # Use Gemini to select the best match if available
+            if self.gemini_model and len(top_results) > 1:
+                selected_result = await self._select_best_product_with_gemini(product_name, top_results)
+                if selected_result:
+                    return self._format_serpapi_result(selected_result)
+            
+            # Otherwise, use the first result
+            best_result = top_results[0]
+            return self._format_serpapi_result(best_result)
+            
+        except Exception as e:
+            logger.error(f"Error searching with SerpAPI: {e}", exc_info=True)
+            return None
+    
+    def _format_serpapi_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Format SerpAPI result into standardized product data."""
+        try:
+            # Extract price
+            price_str = result.get("extracted_price") or result.get("price", "0")
+            try:
+                if isinstance(price_str, (int, float)):
+                    price = float(price_str)
+                else:
+                    # Remove currency symbols and commas
+                    price = float(re.sub(r'[^\d.]', '', str(price_str)))
+            except:
+                price = 0.0
+            
+            return {
+                "title": result.get("title", "Unknown Product"),
+                "current_price": price,
+                "url": result.get("link", ""),
+                "source": result.get("source", "Google Shopping"),
+                "rating": result.get("rating"),
+                "reviews": result.get("reviews"),
+                "thumbnail": result.get("thumbnail"),
+                "tracked_since": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error formatting SerpAPI result: {e}")
+            return None
+    
+    async def _select_best_product_with_gemini(
+        self,
+        query: str,
+        results: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Use Gemini to intelligently select the best matching product."""
+        try:
+            # Prepare results for Gemini
+            results_text = []
+            for i, result in enumerate(results):
+                title = result.get("title", "Unknown")
+                price = result.get("extracted_price") or result.get("price", "N/A")
+                source = result.get("source", "Unknown")
+                rating = result.get("rating", "N/A")
+                results_text.append(f"{i+1}. {title}\n   Price: {price}\n   Source: {source}\n   Rating: {rating}")
+            
+            prompt = f"""User is searching for: "{query}"
+
+Here are the top product results:
+
+{chr(10).join(results_text)}
+
+Which result is the BEST match for what the user is looking for?
+Consider:
+1. Product name relevance to search query
+2. Price reasonableness
+3. Source reliability
+4. Ratings if available
+
+Respond with ONLY the number (1-{len(results)}) of the best match. Just the number, nothing else."""
+
+            response = self.gemini_model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Extract number
+            match = re.search(r'(\d+)', response_text)
+            if match:
+                index = int(match.group(1)) - 1
+                if 0 <= index < len(results):
+                    logger.info(f"Gemini selected result #{index+1} for '{query}'")
+                    return results[index]
+            
+            # Fallback to first result
+            return results[0]
+            
+        except Exception as e:
+            logger.error(f"Error in Gemini product selection: {e}")
+            return results[0] if results else None
     
     async def _search_and_get_product(self, product_name: str) -> Optional[Dict[str, Any]]:
         """

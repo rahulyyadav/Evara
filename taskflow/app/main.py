@@ -44,17 +44,17 @@ IST = pytz.timezone('Asia/Kolkata')
 
 async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: MemoryStore):
     """
-    Background task that checks for due reminders every minute.
+    Background task that checks for due reminders every 15 seconds for accurate timing.
     
     Args:
         reminder_tool: ReminderTool instance
         memory_store: MemoryStore instance
     """
-    logger.info("🔄 Reminder checker loop started")
+    logger.info("🔄 Reminder checker loop started (checking every 15 seconds for accuracy)")
     
     while True:
         try:
-            await asyncio.sleep(60)  # Check every minute
+            await asyncio.sleep(15)  # Check every 15 seconds for more accurate timing
             
             # Get all pending reminders
             pending_reminders = memory_store.get_all_pending_reminders()
@@ -78,10 +78,11 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
                     else:
                         reminder_dt = reminder_dt.astimezone(IST)
                     
-                    # Check if reminder is due (within the last minute)
+                    # Check if reminder is due (within the last 20 seconds for exact timing)
+                    # This gives us some buffer but ensures we send it right after the scheduled time
                     time_diff = (now_ist - reminder_dt).total_seconds()
                     
-                    if 0 <= time_diff < 60:  # Due in the last minute
+                    if 0 <= time_diff < 20:  # Due in the last 20 seconds (catches it on first check after due time)
                         user_number = reminder.get("user_number")
                         reminder_id = reminder.get("id")
                         task = reminder.get("task", "Reminder")
@@ -118,7 +119,7 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
             break
         except Exception as e:
             logger.error(f"Error in reminder checker loop: {e}", exc_info=True)
-            await asyncio.sleep(60)  # Wait before retrying
+            await asyncio.sleep(15)  # Wait before retrying (faster recovery)
 
 
 @asynccontextmanager

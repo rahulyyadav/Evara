@@ -114,14 +114,23 @@ class ReminderTool:
                     "tool": "reminder"
                 }
             
-            # Check if we need country/location for timezone
+            # Try to detect timezone from datetime_str if not explicitly provided
             if not country and not location:
-                return {
-                    "success": False,
-                    "needs_clarification": True,
-                    "message": "I need to know your country or location to set the reminder in your local timezone. Please specify your country (e.g., 'India', 'USA', 'UK') or city.",
-                    "tool": "reminder"
-                }
+                # Check if datetime_str mentions timezone/location
+                datetime_lower = datetime_str.lower()
+                if any(word in datetime_lower for word in ['india', 'indian', 'ist']):
+                    country = "India"
+                    logger.info("Auto-detected timezone: India (IST)")
+                elif any(word in datetime_lower for word in ['usa', 'america', 'est', 'pst', 'cst']):
+                    country = "USA"
+                    logger.info("Auto-detected timezone: USA")
+                elif any(word in datetime_lower for word in ['uk', 'britain', 'london', 'gmt', 'bst']):
+                    country = "UK"
+                    logger.info("Auto-detected timezone: UK")
+                else:
+                    # Default to IST if not specified (since most users are likely in India)
+                    country = "India"
+                    logger.info("Defaulting to India timezone (IST) as no timezone specified")
             
             # Get timezone based on country/location
             user_timezone = self._get_timezone_from_country(country, location)
@@ -438,7 +447,7 @@ class ReminderTool:
     
     async def _parse_datetime_with_gemini(self, datetime_str: str, timezone: Optional[pytz.timezone] = None) -> Optional[datetime]:
         """
-        Use Gemini to parse flexible datetime strings.
+        Use Gemini to parse flexible datetime strings with accurate current time context.
         
         Args:
             datetime_str: Flexible datetime string
@@ -454,18 +463,51 @@ class ReminderTool:
             timezone = IST
         
         now_tz = datetime.now(timezone)
-        timezone_name = str(timezone)
-        prompt = f"""Parse this datetime string into ISO 8601 format (YYYY-MM-DDTHH:MM:SS) in {timezone_name} timezone.
-Current time in {timezone_name}: {now_tz.strftime("%Y-%m-%d %H:%M:%S %Z")}
+        now_utc = datetime.now(pytz.UTC)
+        
+        # Build comprehensive datetime context (like we did for date/time tracking)
+        current_datetime_info = f"""Current Date and Time Information (CRITICAL - Use this for datetime parsing):
 
-Datetime string: "{datetime_str}"
+BASE TIME ({timezone}):
+- Current datetime: {now_tz.strftime('%B %d, %Y at %I:%M:%S %p %Z')}
+- Current date: {now_tz.strftime('%Y-%m-%d')}
+- Current time: {now_tz.strftime('%H:%M:%S')} (24-hour) / {now_tz.strftime('%I:%M:%S %p')} (12-hour)
+- Current day of week: {now_tz.strftime('%A')}
+- ISO format: {now_tz.isoformat()}
+- UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}
+- Timezone: {timezone} ({now_tz.strftime('%Z')})
 
-Examples:
-- "tomorrow at 3pm" -> {((now_tz + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)).isoformat()}
-- "in 2 hours" -> {(now_tz + timedelta(hours=2)).isoformat()}
-- "Dec 10 at 3pm" -> {now_tz.replace(month=12, day=10, hour=15, minute=0, second=0, microsecond=0).isoformat() if now_tz.month <= 12 else (now_tz.replace(year=now_tz.year+1, month=12, day=10, hour=15, minute=0, second=0, microsecond=0)).isoformat()}
+IMPORTANT DATETIME PARSING RULES:
+1. ALWAYS use the current datetime shown above as reference
+2. For "today at X PM", use {now_tz.strftime('%Y-%m-%d')} with the specified time
+3. For "tomorrow at X PM", use {(now_tz + timedelta(days=1)).strftime('%Y-%m-%d')} with the specified time
+4. For "in X hours/minutes", add to {now_tz.strftime('%H:%M:%S')}
+5. For relative times, calculate from {now_tz.strftime('%I:%M %p %Z')}
+6. Always use 24-hour format internally (convert PM times: 2 PM = 14:00, 3 PM = 15:00)
+7. Be precise with seconds - default to :00 seconds if not specified
+8. Be EXACT with time - "at 2PM" means exactly 14:00:00, not approximate
 
-Respond with ONLY the ISO datetime string in {timezone_name} timezone, nothing else. If you cannot parse it, respond with "null"."""
+Examples based on current time being {now_tz.strftime('%B %d at %I:%M %p')}:
+- "today at 2 PM" = {now_tz.strftime('%Y-%m-%d')}T14:00:00
+- "tomorrow at 3 PM" = {(now_tz + timedelta(days=1)).strftime('%Y-%m-%d')}T15:00:00
+- "in 2 hours" = {(now_tz + timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%S')}
+- "at 6:30 PM today" = {now_tz.strftime('%Y-%m-%d')}T18:30:00
+"""
+        
+        prompt = f"""{current_datetime_info}
+
+Datetime string to parse: "{datetime_str}"
+
+Parse this into ISO 8601 format (YYYY-MM-DDTHH:MM:SS) using the current datetime information provided above.
+
+CRITICAL: 
+- Use the exact current time ({now_tz.strftime('%Y-%m-%d %H:%M:%S')}) shown above for all calculations
+- Be precise with hours (convert PM correctly: 2 PM = 14:00, 3 PM = 15:00, 6 PM = 18:00)
+- Default seconds to :00 if not specified
+- Use {timezone} timezone
+- Be EXACT - this is for reminders that need to fire at precise times
+
+Respond with ONLY the ISO datetime string (YYYY-MM-DDTHH:MM:SS), nothing else. If you cannot parse it, respond with "null"."""
         
         try:
             response = self.gemini_model.generate_content(prompt)
