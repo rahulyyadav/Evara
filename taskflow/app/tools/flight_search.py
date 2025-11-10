@@ -610,12 +610,16 @@ Respond with ONLY the 3-letter uppercase airport code, nothing else. If you cann
             Formatted result dictionary
         """
         try:
+            logger.info(f"🔧 Formatting SerpAPI results...")
+            logger.info(f"📋 Response keys: {list(data.keys())}")
+            
             # Extract best flights from SerpAPI response
             # SerpAPI structure may vary, so we'll handle multiple possible structures
             flights = []
             
             # Try to extract flights from different possible response structures
             if "best_flights" in data:
+                logger.info(f"✅ Found 'best_flights' in response with {len(data['best_flights'])} flights")
                 flights_data = data["best_flights"]
             elif "flights" in data:
                 flights_data = data["flights"]
