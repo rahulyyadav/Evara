@@ -96,6 +96,11 @@ async def check_reminders_loop(reminder_tool: ReminderTool, memory_store: Memory
         try:
             await asyncio.sleep(15)  # Check every 15 seconds for more accurate timing
             
+            # CRITICAL FIX: Reload memory from disk to get latest reminders
+            # This ensures we see reminders added after app startup
+            memory_store.load()
+            logger.debug("🔄 Reloaded memory from disk")
+            
             # Get all pending reminders
             pending_reminders = memory_store.get_all_pending_reminders()
             
