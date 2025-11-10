@@ -568,7 +568,8 @@ See comprehensive guides in `docs/`:
 ## 📞 Contact & Links
 
 **Built by:** Rahul Yadav
-**Portfolio:** [rahul-yadav.com.np](https://www.rahul-yadav.com.np)  
+
+**Portfolio:** [rahul-yadav.com.np](https://rahul-yadav.com.np/)  
 **LinkedIn:** [linkedin.com/in/rahulyyadav](https://www.linkedin.com/in/rahulyyadav)  
 **GitHub:** [github.com/rahulyyadav](https://github.com/rahulyyadav)  
 **Live API:** [evara-8w6h.onrender.com](https://evara-8w6h.onrender.com/health)
@@ -629,7 +630,7 @@ This project directly demonstrates the skills needed to build:
 
 ## 🚀 Production Ready • Zero Bugs • Fully Documented
 
-**Built with ❤️ by [Rahul Yadav](https://www.linkedin.com/in/rahulyyadav)**
+**Built with ❤️ by [Rahul Yadav](https://rahul-yadav.com.np/)**
 
 [Live Demo](https://evara-8w6h.onrender.com/health) • [Documentation](./docs/) • [Quick Start](#-quick-start)
 
